@@ -28,7 +28,7 @@ if ROLE not in KNOWN_ROLES:
     raise SystemExit(f"KB_ROLE={ROLE!r} is not a known role; use one of {KNOWN_ROLES}")
 tools.set_role(ROLE)
 
-mcp = MCPServer("kb-assistant")
+mcp = MCPServer("rbac-rag-assistant")
 for fn in tools.TOOLS:
     mcp.tool()(fn)
 

@@ -21,7 +21,7 @@ problem disappears. This is the single most common way a first install fails.
 ## Install
 
 ```powershell
-cd "<install path>\kb-assistant"
+cd "<install path>\rbac-rag-assistant"
 py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
@@ -66,9 +66,9 @@ As an MCP server, for use from an existing client:
 ```json
 {
   "mcpServers": {
-    "kb-assistant": {
-      "command": "<install path>\\kb-assistant\\.venv\\Scripts\\python.exe",
-      "args": ["<install path>\\kb-assistant\\mcp_server.py"],
+    "rbac-rag-assistant": {
+      "command": "<install path>\\rbac-rag-assistant\\.venv\\Scripts\\python.exe",
+      "args": ["<install path>\\rbac-rag-assistant\\mcp_server.py"],
       "env": { "KB_ROLE": "staff" }
     }
   }

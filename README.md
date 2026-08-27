@@ -1,4 +1,4 @@
-# kb-assistant
+# rbac-rag-assistant
 
 Related: drivescore-cloud, a Go service on Kubernetes with Terraform and an incident log.
 
@@ -77,9 +77,9 @@ rules, many clients. Add to a client's config:
 ```json
 {
   "mcpServers": {
-    "kb-assistant": {
-      "command": "C:\\Users\\Shrey\\Documents\\CLAUDE CODE\\kb-assistant\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\Users\\Shrey\\Documents\\CLAUDE CODE\\kb-assistant\\mcp_server.py"],
+    "rbac-rag-assistant": {
+      "command": "C:\\Users\\Shrey\\Documents\\CLAUDE CODE\\rbac-rag-assistant\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\Shrey\\Documents\\CLAUDE CODE\\rbac-rag-assistant\\mcp_server.py"],
       "env": { "KB_ROLE": "staff" }
     }
   }
