@@ -1,0 +1,3 @@
+scikit-learn>=1.4
+google-genai>=2.20
+mcp>=2.0
