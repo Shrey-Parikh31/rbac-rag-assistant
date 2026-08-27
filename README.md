@@ -1,5 +1,7 @@
 # kb-assistant
 
+Related: drivescore-cloud, a Go service on Kubernetes with Terraform and an incident log.
+
 An internal knowledge assistant for a university: staff and students ask
 questions in plain language, and get answers grounded in policy documents they
 are cleared to read. Retrieval-augmented, tool-calling, role-aware, and exposed
