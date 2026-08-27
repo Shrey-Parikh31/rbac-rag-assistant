@@ -1,0 +1,48 @@
+{"id": "q001", "role": "student", "kind": "answer", "source": "enrollment.md", "q": "How late can I enroll in a course?"}
+{"id": "q002", "role": "student", "kind": "answer", "source": "enrollment.md", "q": "What does late enrollment cost?"}
+{"id": "q003", "role": "student", "kind": "answer", "source": "enrollment.md", "q": "When does the enrollment window open?"}
+{"id": "q004", "role": "student", "kind": "answer", "source": "enrollment.md", "q": "What is the maximum number of credits per semester?"}
+{"id": "q005", "role": "student", "kind": "answer", "source": "enrollment.md", "q": "Can I take more than 18 credits?"}
+{"id": "q006", "role": "student", "kind": "answer", "source": "enrollment.md", "q": "Do I need permission to add a class after the deadline?", "paraphrase": true}
+{"id": "q007", "role": "student", "kind": "answer", "source": "enrollment.md", "q": "Is there a charge for signing up to a course late?", "paraphrase": true}
+{"id": "q008", "role": "student", "kind": "answer", "source": "enrollment.md", "q": "Who approves an overload of courses?", "paraphrase": true}
+{"id": "q009", "role": "student", "kind": "answer", "source": "grading.md", "q": "When are final grades posted?"}
+{"id": "q010", "role": "student", "kind": "answer", "source": "grading.md", "q": "How long do I have to request a grade review?"}
+{"id": "q011", "role": "student", "kind": "answer", "source": "grading.md", "q": "What GPA places a student on academic probation?"}
+{"id": "q012", "role": "student", "kind": "answer", "source": "grading.md", "q": "What happens after two consecutive semesters on probation?"}
+{"id": "q013", "role": "student", "kind": "answer", "source": "grading.md", "q": "Who do I raise a grade appeal with first?"}
+{"id": "q014", "role": "student", "kind": "answer", "source": "grading.md", "q": "Can a grade appeal go above the dean?"}
+{"id": "q015", "role": "student", "kind": "answer", "source": "grading.md", "q": "My marks look wrong, who do I complain to?", "paraphrase": true}
+{"id": "q016", "role": "student", "kind": "answer", "source": "grading.md", "q": "Am I at risk of being thrown out for bad results?", "paraphrase": true}
+{"id": "q017", "role": "student", "kind": "restricted", "level": "staff", "q": "What should I do if I think someone hacked my account?"}
+{"id": "q018", "role": "student", "kind": "restricted", "level": "staff", "q": "Who handles security incidents at the university?"}
+{"id": "q019", "role": "student", "kind": "restricted", "level": "staff", "q": "How quickly must a suspected compromise be reported?"}
+{"id": "q020", "role": "student", "kind": "restricted", "level": "confidential", "q": "What are the faculty compensation bands?"}
+{"id": "q021", "role": "student", "kind": "restricted", "level": "confidential", "q": "How much does an assistant professor earn?"}
+{"id": "q022", "role": "student", "kind": "restricted", "level": "confidential", "q": "What is the adjunct rate per credit hour?"}
+{"id": "q023", "role": "student", "kind": "absent", "q": "Is there a policy on wearing hats during examinations?"}
+{"id": "q024", "role": "student", "kind": "absent", "q": "Where can I park a motorcycle on campus?"}
+{"id": "q025", "role": "student", "kind": "absent", "q": "What are the library opening hours?"}
+{"id": "q026", "role": "student", "kind": "absent", "q": "How do I join a varsity sports team?"}
+{"id": "q027", "role": "student", "kind": "absent", "q": "Is there a dress code for the graduation ceremony?"}
+{"id": "q028", "role": "student", "kind": "absent", "q": "How much does campus housing cost?"}
+{"id": "q029", "role": "student", "kind": "absent", "known_false_positive": true, "q": "Who is a full professor here?"}
+{"id": "q030", "role": "student", "kind": "absent", "known_false_positive": true, "q": "What happens in the first hour of class?"}
+{"id": "q031", "role": "student", "kind": "absent", "q": "What academic disciplines does the university offer?"}
+{"id": "q032", "role": "staff", "kind": "answer", "source": "incident-response.md", "q": "Who do I report a security incident to?"}
+{"id": "q033", "role": "staff", "kind": "answer", "source": "incident-response.md", "q": "How long do I have to report a suspected compromise?"}
+{"id": "q034", "role": "staff", "kind": "answer", "source": "incident-response.md", "q": "What counts as a severity one incident?"}
+{"id": "q035", "role": "staff", "kind": "answer", "source": "incident-response.md", "q": "Do I need a postmortem for a minor incident?"}
+{"id": "q036", "role": "staff", "kind": "answer", "source": "incident-response.md", "q": "Should I try to clean up a compromised machine myself?", "paraphrase": true}
+{"id": "q037", "role": "staff", "kind": "answer", "source": "incident-response.md", "q": "Does a breach affecting logins wake someone up at night?", "paraphrase": true}
+{"id": "q038", "role": "staff", "kind": "answer", "source": "enrollment.md", "q": "What is the late enrollment fee?"}
+{"id": "q039", "role": "staff", "kind": "restricted", "level": "confidential", "q": "What do full professors earn?"}
+{"id": "q040", "role": "staff", "kind": "restricted", "level": "confidential", "q": "What is the adjunct pay per credit hour?"}
+{"id": "q041", "role": "admin", "kind": "answer", "source": "salary-bands.md", "q": "What is the adjunct pay per credit hour?"}
+{"id": "q042", "role": "admin", "kind": "answer", "source": "salary-bands.md", "q": "What is the salary range for an associate professor?"}
+{"id": "q043", "role": "admin", "kind": "answer", "source": "salary-bands.md", "q": "What do assistant professors make?"}
+{"id": "q044", "role": "admin", "kind": "answer", "source": "salary-bands.md", "q": "What are the faculty compensation bands?"}
+{"id": "q045", "role": "admin", "kind": "answer", "source": "grading.md", "q": "What GPA leads to academic suspension?"}
+{"id": "q046", "role": "admin", "kind": "answer", "source": "incident-response.md", "q": "When must a postmortem be written?"}
+{"id": "q047", "role": "admin", "kind": "absent", "q": "What is the parking permit fee for staff?"}
+{"id": "q048", "role": "student", "kind": "restricted", "level": "staff", "q": "What is the procedure when student data is exposed?"}

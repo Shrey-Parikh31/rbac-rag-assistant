@@ -22,6 +22,13 @@ CLEARANCE = {"student": {"public"},
 # a clearance level cannot leave this pointing at the second-highest one.
 MAX_ROLE = max(CLEARANCE, key=lambda r: len(CLEARANCE[r]))
 
+# Minimum cosine similarity for a chunk to count as a match. TF-IDF returns a
+# nonzero score for any shared word, so without a floor "academic disciplines"
+# matches the grading policy on the word "academic" and the assistant answers
+# from a document about something else. Value chosen by eval/sweep.py, not by
+# taste; see eval/README.md for the table that picked it.
+MIN_SCORE = 0.08
+
 
 def parse(path):
     """Split a markdown file into its front matter and body."""
@@ -96,7 +103,7 @@ class Index:
         sims = cosine_similarity(self.vec.transform([query]), self.matrix[idx])[0]
         ranked = sorted(zip(idx, sims), key=lambda t: -t[1])[:k]
         return [dict(self.chunks[i], score=round(float(s), 4))
-                for i, s in ranked if s > 0]
+                for i, s in ranked if s > MIN_SCORE]
 
 
 if __name__ == "__main__":

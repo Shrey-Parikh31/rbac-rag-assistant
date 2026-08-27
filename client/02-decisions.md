@@ -212,3 +212,30 @@ different properties.
 
 **Reversed if:** never for evaluation. A demo may use an alias if someone
 prefers, but no measurement should.
+
+---
+
+## ADR-9: A minimum similarity floor, chosen by measurement
+
+**Status:** accepted
+
+**Context.** TF-IDF returns a nonzero score for any shared word. "What academic
+disciplines does the university offer" matched the grading policy on the word
+"academic", and the assistant answered from a document about something else. The
+system had no way to say "nothing here covers that", because something always
+scored above zero.
+
+**Decision.** A floor on cosine similarity, `rag.MIN_SCORE`, set to **0.08**.
+
+**Consequences.** The value was swept across the golden set rather than chosen
+by taste. Below 0.08 the nonsense matches survive; above it real matches start
+dying, with `answer` falling from 26/29 at 0.08 to 24/29 at 0.10 and 15/29 at
+0.20. Total moved from 77.1% to 83.3% for a one-line change.
+
+This is the first decision in this project made from a number rather than an
+argument, which is what phase three was for.
+
+**Reversed if:** the corpus grows or the retriever changes. The floor is a
+property of this scoring method on this corpus, not a universal constant, so
+re-run `eval/sweep.py` after either. That is written into the code comment as
+well as here.
