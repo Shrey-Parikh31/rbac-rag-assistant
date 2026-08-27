@@ -14,7 +14,7 @@
 {"id": "q014", "role": "student", "kind": "answer", "source": "grading.md", "q": "Can a grade appeal go above the dean?"}
 {"id": "q015", "role": "student", "kind": "answer", "source": "grading.md", "q": "My marks look wrong, who do I complain to?", "paraphrase": true}
 {"id": "q016", "role": "student", "kind": "answer", "source": "grading.md", "q": "Am I at risk of being thrown out for bad results?", "paraphrase": true}
-{"id": "q017", "role": "student", "kind": "restricted", "level": "staff", "q": "What should I do if I think someone hacked my account?"}
+{"id": "q017", "role": "student", "kind": "restricted", "level": "staff", "paraphrase": true, "q": "What should I do if I think someone hacked my account?"}
 {"id": "q018", "role": "student", "kind": "restricted", "level": "staff", "q": "Who handles security incidents at the university?"}
 {"id": "q019", "role": "student", "kind": "restricted", "level": "staff", "q": "How quickly must a suspected compromise be reported?"}
 {"id": "q020", "role": "student", "kind": "restricted", "level": "confidential", "q": "What are the faculty compensation bands?"}
@@ -36,7 +36,7 @@
 {"id": "q036", "role": "staff", "kind": "answer", "source": "incident-response.md", "q": "Should I try to clean up a compromised machine myself?", "paraphrase": true}
 {"id": "q037", "role": "staff", "kind": "answer", "source": "incident-response.md", "q": "Does a breach affecting logins wake someone up at night?", "paraphrase": true}
 {"id": "q038", "role": "staff", "kind": "answer", "source": "enrollment.md", "q": "What is the late enrollment fee?"}
-{"id": "q039", "role": "staff", "kind": "restricted", "level": "confidential", "q": "What do full professors earn?"}
+{"id": "q039", "role": "staff", "kind": "restricted", "level": "confidential", "morphology": true, "q": "What do full professors earn?"}
 {"id": "q040", "role": "staff", "kind": "restricted", "level": "confidential", "q": "What is the adjunct pay per credit hour?"}
 {"id": "q041", "role": "admin", "kind": "answer", "source": "salary-bands.md", "q": "What is the adjunct pay per credit hour?"}
 {"id": "q042", "role": "admin", "kind": "answer", "source": "salary-bands.md", "q": "What is the salary range for an associate professor?"}

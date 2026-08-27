@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import rag
 import tools
 from retrieval import load_golden, score  # noqa: E402
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
 def run_at(floor, cases):

@@ -19,7 +19,7 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import tools
-from rag import Index, load, CLEARANCE
+from rag import CLEARANCE
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GOLDEN = os.path.join(HERE, "golden.jsonl")
@@ -42,20 +42,27 @@ def cleared(role, level):
 
 def load_golden(path=GOLDEN):
     with open(path, encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+        cases = [json.loads(line) for line in f if line.strip()]
+    known = tools.TOOL_ACCESS["search_docs"]
+    for c in cases:
+        # A typo'd role would otherwise raise Denied mid-run, after the report
+        # header has already printed.
+        assert c["role"] in known, f"{c['id']}: unknown role {c['role']!r}"
+        assert c["kind"] in ("answer", "restricted", "absent"), c["id"]
+    return cases
 
 
 def classify(answer):
     """What kind of response did search_docs produce?"""
-    if answer.startswith("No passages match that query"):
+    if answer == tools.NO_MATCH:
         return "absent"
-    if "clearance" in answer and "does match" in answer:
+    if answer.startswith(tools.RESTRICTED_PREFIX):
         return "restricted"
     return "answer"
 
 
 def score(cases):
-    index = Index(load(os.path.join(os.path.dirname(HERE), "docs")))
+    index = tools.index()   # the same index the tools use, so KB_DOCS cannot diverge
     results = []
 
     for c in cases:

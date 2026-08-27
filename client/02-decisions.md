@@ -239,3 +239,46 @@ argument, which is what phase three was for.
 property of this scoring method on this corpus, not a universal constant, so
 re-run `eval/sweep.py` after either. That is written into the code comment as
 well as here.
+
+---
+
+## ADR-10: Keep word-level matching, despite it losing on the headline number
+
+**Status:** accepted, measured
+
+**Context.** Word-level TF-IDF treats "professors" and "professor" as unrelated
+tokens. "What do full professors earn?" scores **zero** against a document
+containing "Full Professor", while "Who is a full professor here?" scores 0.28.
+The same failure applies to grades, credits, appeals and incidents. Character
+n-grams overlap on the shared stem and need no new dependency.
+
+**Decision.** Do not switch. Keep word-level, and record why.
+
+**Consequences.** Each analyzer was swept to its own best floor:
+
+| Analyzer | Total | `answer` | `absent` | paraphrase | plural |
+|---|---|---|---|---|---|
+| word 1-2 (current) | **40/48** | 26/29 | **7/10** | 4/8 | 0/1 |
+| word 1-2 sublinear | 40/48 | 26/29 | 7/10 | 4/8 | 0/1 |
+| char_wb 3-5 | 36/48 | 25/29 | 4/10 | 4/8 | 1/1 |
+| char_wb 4-6 | 37/48 | **28/29** | 2/10 | **6/8** | 1/1 |
+
+Character n-grams are **better at finding and much worse at refusing**. They fix
+the plural bug, lift paraphrase matching from 4/8 to 6/8 and near-perfect the
+`answer` class at 28/29, then collapse `absent` from 7/10 to 2/10, because when
+everything looks a bit similar to everything, nothing looks like nothing.
+
+For an assistant over confidential material, answering from the wrong document
+is the worse failure. Refusing correctly is a safety property; finding a
+paraphrase is a convenience. So the convenience loses.
+
+**The important part is that the totals lie.** 40 against 37 says word-level
+wins by a nose. The breakdown says the two are good at opposite halves of the
+job. Anyone reporting only the headline number would have concluded there was
+nothing to see here.
+
+**Reversed if:** semantic retrieval is tried, since embeddings should improve
+finding without destroying refusing, which is the combination neither analyzer
+here achieves. A hybrid (word-level first, character n-grams only when nothing
+is found) would likely capture both, and is deliberately not built yet: it adds
+a second retrieval path to maintain for a gain nobody has measured.

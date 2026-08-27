@@ -32,6 +32,13 @@ TOOL_ACCESS = {
     "file_ticket": {"staff", "admin"},
 }
 
+# Sentinel replies. Named because eval/ classifies responses by matching them,
+# and a scorer that string-matches a message someone later reworded produces a
+# confident wrong number rather than an error.
+NO_MATCH = ("No passages match that query. No document covers it at any "
+            "clearance level.")
+RESTRICTED_PREFIX = "No passages you are cleared to read match that query, but "
+
 SEVERITIES = {1, 2, 3}
 TICKETS = os.environ.get("KB_TICKETS", "tickets.jsonl")
 
@@ -96,13 +103,13 @@ def search_docs(query: str, k: int = 3) -> str:
     restricted = index().search(query, role=MAX_ROLE, k=1)
     if restricted:
         required = restricted[0]["role"]
-        return (f"No passages you are cleared to read match that query, but "
+        return (RESTRICTED_PREFIX +
                 f"material classified '{required}' does match. Tell the user "
                 f"that guidance on this exists and requires {required} "
                 f"clearance, and that they should contact the office that owns "
                 f"it. You have not been shown the contents and must not "
                 f"speculate about them.")
-    return "No passages match that query. No document covers it at any clearance level."
+    return NO_MATCH
 
 
 def check_academic_standing(gpa: float, consecutive_probation_semesters: int = 0) -> str:
