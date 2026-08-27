@@ -1,6 +1,7 @@
 # rbac-rag-assistant
 
-Related: drivescore-cloud, a Go service on Kubernetes with Terraform and an incident log.
+Related: [drivescore-cloud](https://github.com/Shrey-Parikh31/drivescore-cloud), a Go
+service on Kubernetes with Terraform and an incident log.
 
 An internal knowledge assistant for a university: staff and students ask
 questions in plain language, and get answers grounded in policy documents they
