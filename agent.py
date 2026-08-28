@@ -15,6 +15,7 @@ a framework would wrap what already exists and put its fingers in all four files
 import os
 import sys
 import re
+import time
 import functools
 
 from google import genai
@@ -64,7 +65,13 @@ def _speakable(fn):
 
 
 def ask(question, role="student"):
-    """One turn. Returns the final text, having run whatever tools it needed."""
+    """One turn.
+
+    Returns a dict, not a string: evaluation needs to know which tools were
+    called and what the turn cost, and a caller that only wants the answer can
+    read ["text"]. Latency and tokens are recorded here rather than by the
+    caller because only here are the boundaries of the turn known.
+    """
     tools.set_role(role)
     client = genai.Client()
 
@@ -88,30 +95,61 @@ def ask(question, role="student"):
     # difference between "the provider is busy" and "the assistant has no
     # answer", and a stack trace says neither. On the free tier 503 is common
     # enough to be an expected state rather than an exception.
+    started = time.monotonic()
     try:
         response = chat.send_message(question)
     except errors.APIError as e:
         if e.code in (503, 504):
-            return (f"The model provider is busy or timed out ({MODEL}). This is "
-                    f"temporary; try again shortly, or set KB_MODEL to another "
-                    f"model. Retrieval is unaffected: `python rag.py <role> "
-                    f"<question>` still works.")
+            return _failed(f"The model provider is busy or timed out ({MODEL}). "
+                           f"This is temporary; try again shortly, or set KB_MODEL "
+                           f"to another model. Retrieval is unaffected: "
+                           f"`python rag.py <role> <question>` still works.",
+                           "unavailable", started)
         if e.code == 429:
             # The free tier allows a handful of requests per minute. This is a
             # normal operating state here, not a fault, and it is the constraint
             # that decides how long a phase three evaluation run takes.
             wait = re.search(r"retry in ([\d.]+)s", str(e.message or ""), re.I)
             when = f" Retry in about {float(wait.group(1)):.0f} seconds." if wait else ""
-            return f"Rate limit reached on the free tier.{when}"
-        return f"The model provider returned an error ({e.code}): {e.message}"
+            return _failed(f"Rate limit reached on the free tier.{when}",
+                           "rate_limited", started, retry_after=wait and float(wait.group(1)))
+        return _failed(f"The model provider returned an error ({e.code}): {e.message}",
+                       f"error_{e.code}", started)
+    except Exception as e:
+        # A dropped connection is not an APIError, so without this a DNS blip
+        # 20 minutes into a 25 minute evaluation run raises out of the loop and
+        # every answer not yet written to disk is lost. The caller decides
+        # whether to retry; this only refuses to take the run down with it.
+        return _failed(f"Could not reach the model provider: "
+                       f"{type(e).__name__}: {e}", "transport_error", started)
 
-    for call in (response.automatic_function_calling_history or []):
-        for part in (call.parts or []):
+    # In chat mode `response.automatic_function_calling_history` is always None;
+    # the calls are recorded on the chat, not on the reply. Reading the wrong one
+    # reports "no tools were used" for a turn that used them, which grades as a
+    # model failure rather than as the measurement bug it is.
+    calls = []
+    for message in chat.get_history():
+        for part in (message.parts or []):
             if part.function_call:
-                print(f"  -> {part.function_call.name}({dict(part.function_call.args)})",
-                      file=sys.stderr)
+                calls.append({"name": part.function_call.name,
+                              "args": dict(part.function_call.args)})
 
-    return response.text or "(no answer returned)"
+    usage = response.usage_metadata
+    return {"text": response.text or "(no answer returned)",
+            "tools": calls,
+            "latency_s": round(time.monotonic() - started, 2),
+            "in_tokens": getattr(usage, "prompt_token_count", None),
+            "out_tokens": getattr(usage, "candidates_token_count", None),
+            "total_tokens": getattr(usage, "total_token_count", None),
+            "model": MODEL,
+            "status": "ok"}
+
+
+def _failed(text, status, started, retry_after=None):
+    """Same shape as a success, so a caller never has to branch on the type."""
+    return {"text": text, "tools": [], "latency_s": round(time.monotonic() - started, 2),
+            "in_tokens": None, "out_tokens": None, "total_tokens": None,
+            "model": MODEL, "status": status, "retry_after": retry_after}
 
 
 if __name__ == "__main__":

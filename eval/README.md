@@ -35,14 +35,17 @@ Exit code is 1 if any leak is detected, so it is already usable as a build gate.
 | **Total** | **40/48, 83.3%** |
 | Leaks | **0** |
 | False "restricted material exists" notices | 2/39, 5% |
-| Paraphrased questions | 4/7, 57% |
+| Paraphrased questions | 4/8, **50%** |
 
-**The paraphrase row is the important one.** Those seven questions deliberately
+**The paraphrase row is the important one.** Those eight questions deliberately
 avoid the vocabulary of the document that answers them ("my marks look wrong"
-against a document that says "grade appeal"). 57% is what lexical retrieval can
-do, and it is the number semantic retrieval has to beat to justify ADR-3 being
-reversed. Without it, switching to embeddings would be a preference. With it,
-it is a decision.
+against a document that says "grade appeal"). **50% is what lexical retrieval
+can do**, and it is the number semantic retrieval has to beat to justify ADR-3
+being reversed. Without it, switching to embeddings would be a preference. With
+it, it is a decision.
+
+The end-to-end run makes this sharper still: all three remaining live failures
+are paraphrase cases, and none are generation failures.
 
 ## The golden set
 
@@ -149,14 +152,101 @@ them is the value the model's query rewriting adds. That gap is worth measuring
 on purpose rather than discovering by accident, and it is the first thing the
 end-to-end scorer should report.
 
+## End-to-end numbers
+
+48 questions, live, `gemini-3.1-flash-lite`.
+
+```powershell
+.\.venv\Scripts\python.exe eval\generate.py               # run and score
+.\.venv\Scripts\python.exe eval\generate.py --score-only  # re-score, free
+```
+
+| Metric | Result |
+|---|---|
+| correctness | 36/38, **94.7%** |
+| refusal | 45/48, **93.8%** |
+| grounding (no restricted content disclosed) | 48/48, **100%** |
+| tool use | 48/48, **100%** |
+| latency | median **1.2s**, p95 13.0s, max 15.5s |
+| tokens | 35,187 total, 733 mean per question |
+| cost | $0.00 on the free tier |
+
+### The headline: the model does real retrieval work
+
+| | Score |
+|---|---|
+| Retrieval alone, raw question | 40/48, **83.3%** |
+| End to end, correctness | 36/38, **94.7%** |
+
+The offline scorer was called a lower bound before this run existed, on the
+theory that the model rewrites the question before searching. That gap is the
+theory being paid off. The model turns "What does late enrollment cost?" into
+"late enrollment fee cost" and "What should I do if I think someone hacked my
+account?" into "hacked account what to do", and several questions the raw
+retrieval scorer marks as misses are answered correctly in practice.
+
+The two are not the same denominator, so this is a direction rather than a
+precise delta. The direction is what matters: **query rewriting is a real
+component of the system, not a detail**, and any future retriever has to be
+compared against the rewritten query, not the user's words.
+
+### Every remaining failure is the same failure
+
+q006, q017 and q036 are the *only* end-to-end failures, and all three were
+already flagged offline as paraphrase misses. Not one is a generation problem.
+The model answers correctly whenever retrieval hands it the right passage.
+
+**Retrieval is the bottleneck, and this run measured that rather than assumed
+it.** That is the strongest possible argument for reversing ADR-3 and trying
+semantic retrieval, and it is now an argument backed by which questions failed
+rather than by which technology is fashionable.
+
+### Latency has a long tail
+
+Median 1.2s, p95 13.0s. A tenfold spread on identical work. Nothing here
+explains it and nothing here needs to yet, but an SLO written on the median
+would be wrong for one request in twenty. That is Layer 2's problem and it now
+has a number waiting for it.
+
+### What grounding at 100% does and does not mean
+
+It means **no restricted content reached anyone not cleared for it**, across
+all 48 questions. That is the property worth having and it holds.
+
+It does **not** mean the answers contain nothing invented. In this run the
+model referred a staff member to an "official IT security portal" that exists
+in no document. Staff are cleared for that material, so nothing tripped. The
+scorer detects *disclosure*, not *invention*.
+
+Also worth recording: the "IT Service Desk" invention seen on
+`gemini-3.6-flash` did not recur on `gemini-3.1-flash-lite`. Hallucination
+behaviour is model-specific, which is an argument for re-running this whole set
+on any model change rather than assuming it transfers.
+
+## On the model, and why it changed mid-layer
+
+Layer 0 ran on `gemini-3.6-flash`. Partway through building this, that model
+began refusing every request with a quota error that never cleared, while
+`gemini-3.5-flash` and `gemini-3.1-flash-lite` served normally on the same key
+and the same code. The free tier's ceiling is per model, and the newest model is
+the most contended.
+
+The evaluation therefore runs on `gemini-3.1-flash-lite`, pinned. It is also
+three times faster (1.2s median against 3.5s) and uses about 25% fewer tokens.
+
+`generate.py` **refuses to score a cache containing answers from more than one
+model.** Six answers from the old model were already cached when the switch
+happened, and averaging them with the new ones would have produced a number
+describing neither, with the report confidently printing one model's name at the
+top. That guard exists because it nearly happened.
+
 ## Not built yet
 
-- **End-to-end scoring**, which needs the API and is therefore slow and rate
-  limited: correctness, groundedness, tool-call accuracy, latency, tokens, cost.
-- **The groundedness scorer specifically.** Layer 0 caught the model inventing
-  "the IT Service Desk or IT Security team" when its source said only "the office
-  that owns it". Plausible, helpful, and not in any retrieved document. That is
-  the behaviour this scorer exists to catch, and it appeared within five live
-  questions.
-- **A regression gate in CI**, which is Layer 1's job. `--json` and the exit code
-  are there for it.
+- **A judge-based groundedness scorer**, to catch invention rather than only
+  disclosure. Needs a second model call per question and is the one place a
+  judge genuinely earns its cost.
+- **A regression gate in CI**, which is Layer 1's job. `--json` and the exit
+  code are there for it.
+- **The provider comparison promised in ADR-6.** The harness is now capable of
+  it: set `KB_MODEL`, clear the cache, re-run, compare. It is a bill and twenty
+  minutes, not a rewrite.
