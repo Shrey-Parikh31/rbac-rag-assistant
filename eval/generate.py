@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import agent
+import rag
 import tools
 from retrieval import load_golden, cleared, SECRETS  # noqa: E402
 
@@ -70,9 +71,11 @@ def load_cache():
 
 
 def save_cache(cache):
+    """Atomic. See rag._write_json: a truncate-then-write killed mid-flight
+    destroys the old cache as well as the new one, which is how a 29 question
+    run became a file of nulls."""
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-    with open(CACHE, "w", encoding="utf-8") as f:
-        json.dump(cache, f, indent=1, ensure_ascii=False)
+    rag._write_json(CACHE, cache)
 
 
 def run(cases, cache, rerun=(), limit=None):

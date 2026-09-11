@@ -50,28 +50,75 @@ the bottleneck. Measure before assuming; at a few thousand chunks it is not.
 
 ---
 
-## ADR-3: TF-IDF for phase one, not embeddings
+## ADR-3: Retrieve by meaning, not by spelling
 
-**Status:** accepted, expected to be revisited
+**Status:** superseded its own earlier decision, on evidence
 
-**Context.** Semantic retrieval is the default choice and the reason a vector
-database usually appears on the diagram.
+**Original decision (phase one).** Lexical retrieval, no embedding model, no
+vector database. The reasoning was not that word matching is good; it was that
+upgrading without a baseline produces a system that is *different*, while
+upgrading with one produces a number that says whether it is *better*. The
+upgrade was made to wait for the golden set.
 
-**Decision.** Lexical retrieval first. No embedding model, no vector database.
+**What the golden set said.** Each strategy swept to its own best floor:
 
-**Consequences.** Retrieval will miss genuine paraphrases, which is the known
-weakness and the reason this is provisional. In exchange phase one has no model
-dependency in the retrieval path, no service to operate, and no 2.5 GB install.
+| Strategy | Total | finds doc | refuses right | says "none" | paraphrase | plural |
+|---|---|---|---|---|---|---|
+| word matching | 40/48 | 26/29 | 7/9 | 7/10 | 4/8 | fails |
+| **meaning** | **45/48** | **28/29** | **8/9** | **9/10** | **6/8** | **passes** |
+| hybrid, words then meaning | 41/48 | 26/29 | 8/9 | 7/10 | 4/8 | passes |
 
-More importantly it establishes a baseline. Upgrading to embeddings without one
-produces a system that is different; upgrading with one produces a number that
-says whether it is better. The evaluation harness in phase three is what makes the
-upgrade decidable, so the upgrade waits for it.
+**Decision.** Embeddings, `gemini-embedding-001`, floor 0.635.
 
-**Reversed if:** the golden set shows lexical retrieval losing. The swap point is
-one class.
+**Consequences.** This is the rare upgrade with no trade in it. ADR-10 found
+that character n-grams bought better finding at the cost of worse refusing, and
+that shape was expected to repeat. It did not: embeddings improved **every**
+category at once, including the ability to say "no document covers that", which
+went from 7/10 to 9/10. The prediction was wrong and the measurement said so.
 
----
+Retrieval total moved **83.3% to 93.8%**, paraphrase matching **50% to 75%**,
+and the plural bug from ADR-10 is gone: "professors" now finds "Professor".
+Leaks stayed at zero, which was the property that could not be traded away.
+
+**End to end, answer correctness did not move: 94.7% before, 94.7% after.** The
+same two questions fail. This is recorded rather than buried because it is the
+most useful thing the change taught: the model rewrites the question before
+searching, and those rewrites were already compensating for weak retrieval.
+Improving a component that something else was covering for yields less than the
+component's own score promises. Refusal did improve, 93.8% to 95.8%, and
+retrieval no longer depends on the model happening to rewrite well.
+
+Latency cost is **7% of a turn**, measured by timing the embedding call
+separately rather than inferred from totals. An earlier reading claimed an
+eight-fold slowdown; it compared runs on different days against an API whose
+own variance exceeds the effect. `agent.ask` now reports `embed_s` and
+`model_s` so that mistake is not available to make twice.
+
+**The hybrid was tested and rejected**, which is worth recording because it was
+the intuitive answer. Consulting embeddings only when word matching found
+nothing scores 41/48, worse than embeddings alone, because word matching keeps
+"finding" wrong documents confidently enough that the fallback never runs.
+
+**Dimensionality: 768, not the full 3072.** These vectors are trained so a
+truncated prefix still works once re-normalised. 768 scored 44/48 against 45/48,
+one question out of 48 and inside noise, for a quarter of the storage and the
+arithmetic. The cache is 518 KB and lives in the repository.
+
+**On the offline property, which nearly died here.** Word matching needed no
+network, which is what let the tests and the retrieval scorer gate every commit
+for free. Embeddings would have destroyed that. The fix is a committed vector
+cache covering the corpus and every question in the golden set, so the tests
+still run offline and instantly. A genuinely new query costs one API call and
+is then cached.
+
+`embed()` **raises rather than falling back** when a vector is missing and no
+key is set. A silent downgrade to word matching would change what the tests
+measure without saying so, which is the single failure mode this project has
+tripped over most often.
+
+**Reversed if:** the corpus grows enough that a flat scan of every vector is
+slow, which is a different problem with a different fix (an approximate index),
+not a reason to return to word matching.
 
 ## ADR-4: A file is the ticket store
 
@@ -225,20 +272,30 @@ disciplines does the university offer" matched the grading policy on the word
 system had no way to say "nothing here covers that", because something always
 scored above zero.
 
-**Decision.** A floor on cosine similarity, `rag.MIN_SCORE`, set to **0.08**.
+**Decision.** A floor on cosine similarity, `rag.MIN_SCORE`.
 
-**Consequences.** The value was swept across the golden set rather than chosen
-by taste. Below 0.08 the nonsense matches survive; above it real matches start
-dying, with `answer` falling from 26/29 at 0.08 to 24/29 at 0.10 and 15/29 at
-0.20. Total moved from 77.1% to 83.3% for a one-line change.
+**Now 0.65, for embeddings.** The original value of 0.08 was swept for word
+matching and is meaningless for the current retriever, because unrelated text
+scores far above zero under an embedding model. The principle survived the
+change of retriever; the number did not, and a floor carried across a
+representation change would have been quietly wrong rather than obviously so.
+
+**Consequences.** Both values were swept across the golden set rather than
+chosen by taste. Under word matching, below 0.08 the nonsense matches survived
+and above it real matches died, with `answer` falling from 26/29 to 15/29 by
+0.20; that change alone moved the total from 77.1% to 83.3%. Under embeddings
+the same sweep picked 0.65.
 
 This is the first decision in this project made from a number rather than an
 argument, which is what phase three was for.
 
 **Reversed if:** the corpus grows or the retriever changes. The floor is a
-property of this scoring method on this corpus, not a universal constant, so
-re-run `eval/sweep.py` after either. That is written into the code comment as
-well as here.
+property of this scoring method on this corpus, not a universal constant, and
+the retriever changing is exactly what happened. Re-sweep after either.
+
+`eval/sweep.py` has been deleted along with the other experiment scripts. Their
+tables are recorded here and in `eval/README.md`, and the scripts themselves are
+in git history. An experiment that has answered its question is not a feature.
 
 ---
 
@@ -279,6 +336,10 @@ nothing to see here.
 
 **Reversed if:** semantic retrieval is tried, since embeddings should improve
 finding without destroying refusing, which is the combination neither analyzer
-here achieves. A hybrid (word-level first, character n-grams only when nothing
-is found) would likely capture both, and is deliberately not built yet: it adds
-a second retrieval path to maintain for a gain nobody has measured.
+here achieves.
+
+**Superseded by ADR-3.** Embeddings were tried and did exactly that: better at
+finding *and* better at refusing, with the plural bug fixed. This decision is
+kept because the prediction it makes was tested and held, and because the
+character-n-gram result is still the clearest illustration in this project of a
+headline number hiding a real trade.

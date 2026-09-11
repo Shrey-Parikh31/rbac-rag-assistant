@@ -5,10 +5,10 @@ Audience: whoever at IT Services has to run this without calling me.
 
 ## What you are deploying
 
-Four Python files and a folder of markdown. No database, no vector store, no
-background service. The index is built in memory at startup from `docs/` and
-takes well under a second on the current corpus. Restarting the process is the
-whole of cache invalidation.
+Four Python files, a folder of markdown, and a committed vector cache. No
+database and no vector store to operate: the index is a few hundred vectors held
+in memory, built at startup from `docs/` in well under a second. Restarting the
+process is the whole of cache invalidation.
 
 ## Prerequisites
 
@@ -43,6 +43,8 @@ clearance rules are not doing what this document claims.
 |---|---|---|
 | `GEMINI_API_KEY` | none | Required for `agent.py`. Not required for tests or retrieval |
 | `KB_MODEL` | `gemini-3.6-flash` | Pinned, not an alias. ADR-8 |
+| `KB_EMBED_MODEL` | `gemini-embedding-001` | Retrieval embeddings |
+| `KB_VECTORS` | `vectors.json` | The committed vector cache |
 | `KB_ROLE` | `student` | MCP server only. See the warning below |
 | `KB_DOCS` | `docs` | Corpus directory |
 | `KB_TICKETS` | `tickets.jsonl` | Ticket log, append only |

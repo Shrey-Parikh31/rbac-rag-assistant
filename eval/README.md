@@ -27,25 +27,27 @@ Exit code is 1 if any leak is detected, so it is already usable as a build gate.
 
 48 questions, retrieval only.
 
-| Class | Pass |
-|---|---|
-| `answer` (a real document should come back) | 26/29, 90% |
-| `restricted` (should report material exists, at the right level) | 7/9, 78% |
-| `absent` (no document covers it) | 7/10, 70% |
-| **Total** | **40/48, 83.3%** |
-| Leaks | **0** |
-| False "restricted material exists" notices | 2/39, 5% |
-| Paraphrased questions | 4/8, **50%** |
+| Class | Word matching (was) | Meaning (now) |
+|---|---|---|
+| `answer` (a real document should come back) | 26/29 | **28/29, 97%** |
+| `restricted` (report it exists, at the right level) | 7/9 | **8/9, 89%** |
+| `absent` (no document covers it) | 7/10 | **9/10, 90%** |
+| **Total** | 40/48, 83.3% | **45/48, 93.8%** |
+| Leaks | 0 | **0** |
+| False "restricted material exists" notices | 2/39 | **1/39, 3%** |
+| Paraphrased questions | 4/8, 50% | **6/8, 75%** |
 
-**The paraphrase row is the important one.** Those eight questions deliberately
+**The paraphrase row is what decided ADR-3.** Those eight questions deliberately
 avoid the vocabulary of the document that answers them ("my marks look wrong"
-against a document that says "grade appeal"). **50% is what lexical retrieval
-can do**, and it is the number semantic retrieval has to beat to justify ADR-3
-being reversed. Without it, switching to embeddings would be a preference. With
-it, it is a decision.
+against a document that says "grade appeal"). Word matching managed 50%. That
+number was recorded *before* embeddings were tried, precisely so the comparison
+could not be argued after the fact. Meaning matching reached 75%.
 
-The end-to-end run makes this sharper still: all three remaining live failures
-are paraphrase cases, and none are generation failures.
+**Nothing was traded for it.** ADR-10 had found that character n-grams bought
+better finding at the cost of much worse refusing, and that trade was expected
+to repeat. It did not. Every category improved at once, including the ability to
+say "no document covers that", which went from 7/10 to 9/10. The prediction was
+wrong, and only the golden set could have shown that.
 
 ## The golden set
 
@@ -108,14 +110,20 @@ and adding questions that duplicate an existing class inflates the denominator
 without improving what the set can detect. Grow it when a real failure appears
 that the set would not have caught. That is a better rule than a target number.
 
-## What the sweep decided
+## What the sweeps decided
 
-`sweep.py` exists to answer one question with evidence instead of taste. TF-IDF
-scores any shared word above zero, so "what academic disciplines does the
-university offer" matched the grading policy on the word "academic", and the
-assistant answered confidently from a document about something else.
+Three experiment scripts were written to settle three arguments with numbers
+instead of taste, and all three have been **deleted now that they have answered**.
+Their tables are below and in the decision record; the scripts are in git
+history. An experiment that has answered its question is not a feature.
 
-Sweeping the minimum similarity:
+### The floor
+
+Word matching scored any shared word above zero, so "what academic disciplines
+does the university offer" matched the grading policy on the word "academic",
+and the assistant answered confidently from a document about something else.
+
+Sweeping the minimum similarity, under word matching:
 
 | Floor | Total | `answer` | `restricted` | `absent` |
 |---|---|---|---|---|
@@ -126,16 +134,64 @@ Sweeping the minimum similarity:
 | 0.15 | 34/48 | 20/29 | 7/9 | 7/10 |
 | 0.20 | 27/48 | 15/29 | 4/9 | 8/10 |
 
-**0.08 is the peak.** Below it, nonsense matches survive. Above it, real matches
-start dying: `answer` falls from 26 to 24 at 0.10 and to 15 at 0.20. The value
-now lives in `rag.MIN_SCORE`, and this table is why it is 0.08 and not a number
-that felt about right.
+**0.08 was the peak**, and total moved **77.1% to 83.3%** for a one-line change.
+That sentence was the deliverable, not the 83.3%.
 
-Total moved **77.1% to 83.3%** for a one-line change. That sentence is the
-deliverable, not the 83.3%.
+The floor is now **0.635**, because the retriever changed and the old number was
+swept for a different representation. A floor carried across that change would
+have been quietly wrong rather than obviously so.
 
-`sweep.py` should be deleted once nobody is arguing about the floor. It is an
-experiment, not a feature.
+**And the first embedding sweep was too coarse.** Steps of 0.05 picked 0.65,
+which cost q046: its correct document ranks *first* at 0.6423 and was excluded
+by eight thousandths. A finer sweep shows a plateau and steep cliffs either
+side:
+
+| Floor | 0.62 | **0.63** | **0.64** | 0.65 | 0.66 |
+|---|---|---|---|---|---|
+| Total | 44/48 | **45/48** | **45/48** | 44/48 | 40/48 |
+
+The shipped value is **0.635, the middle of the plateau rather than an edge**,
+so one noisy question cannot push it off. A plateau this narrow, measured on 48
+questions, is a fragile number: widen the golden set before trusting the third
+decimal place.
+
+### Spelling, meaning, and the trade that was not there
+
+| Strategy | Total | finds doc | refuses right | says "none" | paraphrase | plural |
+|---|---|---|---|---|---|---|
+| word matching | 40/48 | 26/29 | 7/9 | 7/10 | 4/8 | fails |
+| character n-grams | 37/48 | 28/29 | 7/9 | **2/10** | 6/8 | passes |
+| **meaning (embeddings)** | **45/48** | **28/29** | **8/9** | **9/10** | **6/8** | **passes** |
+| hybrid, words then meaning | 41/48 | 26/29 | 8/9 | 7/10 | 4/8 | passes |
+
+Character n-grams are the cautionary row: better at finding, and they collapse
+the ability to refuse, because when everything looks a bit similar to
+everything, nothing looks like nothing. That result is why embeddings were
+expected to cost something too. They did not.
+
+The hybrid is the other useful negative. Consulting embeddings only when word
+matching found nothing scores *worse* than embeddings alone, because word
+matching keeps confidently "finding" wrong documents, so the fallback rarely
+runs.
+
+**Dimensionality.** 768 scored 44/48 against 45/48 at the full 3072. One
+question out of 48, inside noise, for a quarter of the storage and arithmetic.
+768 it is, and the 518 KB cache lives in the repository.
+
+## The cache, and why the offline property survived
+
+Word matching needed no network, and that is what let the tests and this scorer
+gate every commit for free. Embeddings would have destroyed it: every search
+becomes an API call.
+
+The fix is `vectors.json`, committed, covering the corpus and every question in
+the golden set. Tests and retrieval scoring still run offline and instantly. A
+genuinely new query costs one API call and is then cached.
+
+`rag.embed()` **raises rather than falling back** when a vector is missing and
+no key is set. A silent downgrade to word matching would change what the tests
+measure without announcing it, which is the single failure mode this project has
+tripped over most often.
 
 ## Known limitation, and it matters
 
@@ -161,15 +217,57 @@ end-to-end scorer should report.
 .\.venv\Scripts\python.exe eval\generate.py --score-only  # re-score, free
 ```
 
-| Metric | Result |
+| Metric | Word matching | Meaning |
+|---|---|---|
+| correctness | 36/38, 94.7% | **36/38, 94.7%** |
+| refusal | 45/48, 93.8% | **46/48, 95.8%** |
+| grounding (no restricted content disclosed) | 48/48, 100% | **48/48, 100%** |
+| tool use | 48/48, 100% | **48/48, 100%** |
+| tokens | 35,187 | 34,982 |
+| cost | $0.00 | $0.00 |
+
+### The uncomfortable result: the benchmark moved and the product did not
+
+Retrieval scoring improved **83.3% to 93.8%**, a ten point jump. End-to-end
+correctness moved **94.7% to 94.7%**. Not a rounding difference; the same two
+questions fail before and after.
+
+That is worth sitting with, because it is the opposite of what the retrieval
+number predicts, and it has a clean explanation: **the model was already
+compensating.** It rewrites the question before searching, and those rewrites
+were doing the work that better retrieval now does. Improving a component that
+something else was already covering for produces a smaller end-to-end gain than
+the component's own score suggests.
+
+The gains are real but narrower than they look: refusal improved, q046 was
+recovered, the plural bug is fixed, and retrieval no longer depends on the model
+happening to rewrite well. What did *not* happen is a jump in answer quality.
+
+**The general lesson, and the reason both scorers exist:** a component benchmark
+measures the component. It does not measure the system, and the difference is
+exactly the work other parts of the system are quietly doing.
+
+### Latency, and a wrong alarm
+
+An early reading of this run said retrieval had made the system eight times
+slower. That was wrong, and it is recorded because the mistake is instructive:
+it compared two runs on different days against an API whose latency varies by
+more than the effect being measured.
+
+Measured properly, by timing the embedding call separately inside `agent.ask`:
+
+| | |
 |---|---|
-| correctness | 36/38, **94.7%** |
-| refusal | 45/48, **93.8%** |
-| grounding (no restricted content disclosed) | 48/48, **100%** |
-| tool use | 48/48, **100%** |
-| latency | median **1.2s**, p95 13.0s, max 15.5s |
-| tokens | 35,187 total, 733 mean per question |
-| cost | $0.00 on the free tier |
+| median retrieval | **0.00s** (most rewritten queries hit the cache) |
+| median model | **3.46s** |
+| retrieval share of total | **7%** |
+
+The one alarming number, 14.4s for an embedding call, was **client startup**,
+paid once per process, not per query. Warm calls run 1.4 to 2.5s and most cost
+nothing at all.
+
+`agent.ask` now returns `embed_s` and `model_s` alongside the total, because
+"nine seconds" does not say which half to fix, and guessing got it wrong once.
 
 ### The headline: the model does real retrieval work
 

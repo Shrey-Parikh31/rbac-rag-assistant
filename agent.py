@@ -21,6 +21,7 @@ import functools
 from google import genai
 from google.genai import types, errors
 
+import rag
 import tools
 
 # Pinned, not "latest": an alias that moves under an experiment makes its
@@ -96,6 +97,7 @@ def ask(question, role="student"):
     # answer", and a stack trace says neither. On the free tier 503 is common
     # enough to be an expected state rather than an exception.
     started = time.monotonic()
+    embed_before = rag.EMBED_SECONDS
     try:
         response = chat.send_message(question)
     except errors.APIError as e:
@@ -135,9 +137,14 @@ def ask(question, role="student"):
                               "args": dict(part.function_call.args)})
 
     usage = response.usage_metadata
+    embed_s = round(rag.EMBED_SECONDS - embed_before, 2)
+    total = time.monotonic() - started
     return {"text": response.text or "(no answer returned)",
             "tools": calls,
-            "latency_s": round(time.monotonic() - started, 2),
+            "latency_s": round(total, 2),
+            # Split, because "9 seconds" does not say which half to fix.
+            "embed_s": embed_s,
+            "model_s": round(total - embed_s, 2),
             "in_tokens": getattr(usage, "prompt_token_count", None),
             "out_tokens": getattr(usage, "candidates_token_count", None),
             "total_tokens": getattr(usage, "total_token_count", None),

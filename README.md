@@ -27,8 +27,9 @@ py -3.13 -m venv .venv
 .\.venv\Scripts\python.exe test_tools.py
 ```
 
-Both print `ok` and need no API key. Retrieval and the access rules are testable
-offline, which is the point of keeping them out of the model.
+Both print `ok` and need no API key: `vectors.json` is committed and covers the
+corpus and every question in the golden set. Retrieval and the access rules stay
+testable offline, which is the point of keeping them out of the model.
 
 Ask it something (needs `GEMINI_API_KEY`):
 
@@ -47,7 +48,7 @@ Retrieval on its own, no key required:
 
 | File | What it owns |
 |---|---|
-| `rag.py` | Parsing, chunking, the TF-IDF index, and the clearance filter |
+| `rag.py` | Parsing, chunking, the embedding index, and the clearance filter |
 | `tools.py` | The three tools, their access rules, and argument validation |
 | `agent.py` | The tool-calling loop, and the only file that knows which model vendor is used |
 | `mcp_server.py` | The same tools over MCP. No implementation of its own |
@@ -65,9 +66,11 @@ there is nothing to talk it into.
 caller may not see never enters the ranking, so its existence cannot be inferred
 from a gap in the results or from a score that moved.
 
-**TF-IDF, not embeddings.** This is the baseline Layer 3 exists to beat. Swapping
-in a semantic retriever before there is a golden set would be a guess; doing it
-after produces a number that justifies the change. The swap point is `Index`.
+**Retrieval by meaning, and the number that justified it.** This started as word
+matching on purpose, as the baseline the evaluation layer existed to beat.
+Swapping before the golden set existed would have been a guess. Swapping after
+produced a table: 83.3% to 91.7% overall, paraphrase matching 50% to 75%, and no
+category got worse. ADR-3.
 
 ## MCP
 
@@ -142,6 +145,7 @@ first five live questions.
 |---|---|---|
 | `GEMINI_API_KEY` | | Required by `agent.py` only |
 | `KB_MODEL` | `gemini-3.6-flash` | Pinned, not an alias. ADR-8 |
+| `KB_EMBED_MODEL` | `gemini-embedding-001` | Retrieval. Vectors cached in `vectors.json` |
 | `KB_ROLE` | `student` | MCP server only |
 | `KB_DOCS` | `docs` | Corpus directory |
 | `KB_TICKETS` | `tickets.jsonl` | Ticket log |
