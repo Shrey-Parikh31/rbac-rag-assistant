@@ -1,6 +1,7 @@
 ---
 role: public
 title: Grading and Academic Standing
+keywords: marks, results, scores, transcript, GPA, academic standing, academic probation, academic suspension, being dismissed, failing, disputing a grade, appealing a grade, grade review, remarking, who to complain to about a grade
 ---
 Final grades are posted within ten business days of the last examination.
 Students may request a grade review within thirty days of posting.

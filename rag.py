@@ -29,19 +29,22 @@ EMBED_MODEL = os.environ.get("KB_EMBED_MODEL", "gemini-embedding-001")
 # quarter of the storage and the arithmetic. ADR-3.
 EMBED_DIM = 768
 
-# Minimum cosine similarity for a chunk to count as a match. Swept against the
-# golden set, not chosen by taste. Unrelated text from this model still scores
-# well above zero, so a floor is not optional here.
+# Minimum cosine similarity for a chunk to count as a match. Unrelated text from
+# this model still scores well above zero, so a floor is not optional here.
 #
-# 0.635 is the middle of a plateau, not a peak. 0.63 and 0.64 both score 45/48
-# and the cliffs either side are steep: 44 at 0.62, 40 at 0.66. Taking the
-# midpoint rather than an edge means one noisy question cannot push the shipped
-# value off the plateau. A first, coarser sweep picked 0.65 and cost q046, whose
-# correct document ranks first at 0.6423 and was excluded by eight thousandths.
+# The only number in the system fitted to data, so it is fitted on the `tune`
+# split alone and never on `test`. Earlier values (0.65, 0.635) were swept over
+# every question and then reported on every question, which measures the tuning
+# as much as the retriever.
 #
-# ponytail: a narrow plateau measured on 48 questions is a fragile number. Widen
-# the golden set before trusting the third decimal place.
-MIN_SCORE = 0.635
+# Selection rule, fixed before reading test: among floors scoring within one of
+# the best on tune, take the midpoint. The exact peak overfits to a single case;
+# the midpoint of the near-best band survives one noisy question. Here the band
+# is 0.59 to 0.63, so 0.61.
+#
+# tune 94.5%, held-out test 90.0%. The 4.5 point gap is the honest cost of
+# having written both the documents and the tune questions.
+MIN_SCORE = 0.61
 
 # Who may see what. A request carries a role; a chunk carries a role. The
 # request's clearance must cover the chunk's.
@@ -66,7 +69,7 @@ def parse(path):
     """Split a markdown file into its front matter and body."""
     with open(path, encoding="utf-8") as f:
         raw = f.read()
-    meta = {"role": "public", "title": os.path.basename(path)}
+    meta = {"role": "public", "title": os.path.basename(path), "keywords": ""}
     m = re.match(r"^---\n(.*?)\n---\n(.*)$", raw, re.S)
     body = raw
     if m:
@@ -106,7 +109,8 @@ def load(docs_dir=None):
         meta, body = parse(path)
         for i, c in enumerate(chunk(body)):
             chunks.append({"text": c, "source": os.path.basename(path),
-                           "title": meta["title"], "role": meta["role"], "i": i})
+                           "title": meta["title"], "keywords": meta["keywords"],
+                           "role": meta["role"], "i": i})
     return chunks
 
 
@@ -194,12 +198,16 @@ def _unit(m):
 class Index:
     def __init__(self, chunks):
         self.chunks = chunks
-        # The title is embedded with the chunk but not stored into it. People
-        # search using a document's title far more often than its wording, and
-        # parse() lifts the title out of the body into metadata. Kept out of
-        # `text` so it does not repeat in every prompt.
-        self.matrix = embed([f"{c['title']}\n{c['text']}" for c in chunks],
-                            "RETRIEVAL_DOCUMENT")
+        # Title and keywords are embedded with the chunk but never stored into
+        # it. People search using a document's title, and more often using
+        # everyday words the policy itself never uses: "hacked account" against
+        # a document that says "suspected compromise". The keywords are the
+        # author's own list of what people will call this, the same job a
+        # librarian does with subject headings. Both stay out of `text`, so
+        # neither repeats in a prompt nor reaches an answer.
+        self.matrix = embed(
+            [f"{c['title']}\n{c['keywords']}\n{c['text']}" for c in chunks],
+            "RETRIEVAL_DOCUMENT")
 
     def search(self, query, role="student", k=3):
         """Top k chunks this role is cleared to see.

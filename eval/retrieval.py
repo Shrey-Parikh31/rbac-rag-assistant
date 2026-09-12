@@ -26,13 +26,40 @@ GOLDEN = os.path.join(HERE, "golden.jsonl")
 K = 3
 
 # Strings that must never reach a caller below the clearance that owns them.
-# Checked on every single answer, not only the ones expected to be restricted,
-# because a leak is most likely where nobody thought to look.
+# Checked on every answer, not only the ones expected to be restricted, because
+# a leak is most likely where nobody thought to look.
+#
+# Choosing these is harder than it looks, and the first attempt was wrong twice.
+#
+# "service desk", "on-call engineer" and "student data" were canaries for the
+# staff level. All three appear in `file_ticket`'s own description, which the
+# model is legitimately shown on every turn. A model repeating them is not
+# disclosing a document, and three of four staff canaries were therefore unable
+# to detect anything while looking like they could.
+#
+# The surviving staff canaries are phrases that exist only in the staff document
+# and in no tool description. Confidential canaries are salary figures, which
+# appear nowhere else at all.
 SECRETS = {
     "confidential": ["78,000", "96,000", "95,000", "124,000", "120,000",
                      "187,000", "1,450"],
-    "staff": ["service desk", "on-call engineer", "postmortem"],
+    "staff": ["one hour of discovery", "remediate", "five business days",
+              "written postmortem"],
 }
+
+
+def leaks_in(text, role, question=""):
+    """Restricted strings in `text` that `role` may not see.
+
+    Terms the user supplied are excluded. Asking "what is the postmortem
+    requirement" and being told "guidance on postmortem requirements requires
+    staff clearance" is the correct behaviour, and scoring it as a leak marks
+    the system wrong for repeating the question back.
+    """
+    low, q = text.lower(), question.lower()
+    return [s for level, strings in SECRETS.items()
+            if not cleared(role, level)
+            for s in strings if s.lower() in low and s.lower() not in q]
 
 
 def cleared(role, level):
@@ -40,7 +67,16 @@ def cleared(role, level):
     return level in CLEARANCE.get(role, {"public"})
 
 
-def load_golden(path=GOLDEN):
+KINDS = ("answer", "restricted", "absent", "action")
+
+
+def load_golden(path=GOLDEN, split=None):
+    """Every case, or only one side of the tune/test split.
+
+    `tune` is what thresholds may be fitted on. `test` is never used for fitting
+    anything, so the number it produces is the honest one. Mixing them is how a
+    score becomes a measurement of its own tuning.
+    """
     with open(path, encoding="utf-8") as f:
         cases = [json.loads(line) for line in f if line.strip()]
     known = tools.TOOL_ACCESS["search_docs"]
@@ -48,7 +84,10 @@ def load_golden(path=GOLDEN):
         # A typo'd role would otherwise raise Denied mid-run, after the report
         # header has already printed.
         assert c["role"] in known, f"{c['id']}: unknown role {c['role']!r}"
-        assert c["kind"] in ("answer", "restricted", "absent"), c["id"]
+        assert c["kind"] in KINDS, f"{c['id']}: bad kind {c['kind']!r}"
+        assert c["split"] in ("tune", "test"), f"{c['id']}: bad split"
+    if split:
+        cases = [c for c in cases if c["split"] == split]
     return cases
 
 
@@ -65,7 +104,10 @@ def score(cases):
     index = tools.index()   # the same index the tools use, so KB_DOCS cannot diverge
     results = []
 
-    for c in cases:
+    # `action` cases are commands that should invoke a tool. Retrieval is not
+    # what they test, so scoring them here would measure the wrong thing and
+    # dilute the number. eval/generate.py owns them.
+    for c in [c for c in cases if c["kind"] != "action"]:
         tools.set_role(c["role"])
         answer = tools.search_docs(c["q"], k=K)
         got = classify(answer)
@@ -87,13 +129,43 @@ def score(cases):
         elif not ok:
             detail = f"expected {c['kind']}, got {got}"
 
-        leaks = [s for level, strings in SECRETS.items()
-                 if not cleared(c["role"], level)
-                 for s in strings if s.lower() in answer.lower()]
+        leaks = leaks_in(answer, c["role"], c["q"])
 
         results.append({**c, "got": got, "ok": ok, "detail": detail, "leaks": leaks})
 
     return results
+
+
+def summarise(results):
+    """Totals for one set of results, used per split and overall."""
+    by = {}
+    for r in results:
+        d = by.setdefault(r["kind"], [0, 0])
+        d[0] += r["ok"]
+        d[1] += 1
+    para = [r for r in results if r.get("paraphrase")]
+    return {"total": sum(r["ok"] for r in results), "n": len(results), "by": by,
+            "para": sum(r["ok"] for r in para), "n_para": len(para),
+            "leaks": sum(bool(r["leaks"]) for r in results)}
+
+
+def split_table(results):
+    """The headline. test is the number that has not been fitted to."""
+    print(f"\n{'':<8}{'total':>12}{'answer':>10}{'restricted':>12}"
+          f"{'absent':>9}{'paraphrase':>13}{'leaks':>7}")
+    for split in ("tune", "test", "ALL"):
+        rs = results if split == "ALL" else [r for r in results if r["split"] == split]
+        if not rs:
+            continue
+        s = summarise(rs)
+        cell = lambda k: (f"{s['by'][k][0]}/{s['by'][k][1]}" if k in s["by"] else "-")
+        pct = 100 * s["total"] / s["n"]
+        para = f"{s['para']}/{s['n_para']}" if s["n_para"] else "-"
+        print(f"{split:<8}{s['total']:>5}/{s['n']:<3}{pct:>5.1f}%"
+              f"{cell('answer'):>10}{cell('restricted'):>12}{cell('absent'):>9}"
+              f"{para:>13}{s['leaks']:>7}")
+    print("\n  tune  = thresholds were fitted on these, so this number flatters")
+    print("  test  = never used for fitting anything. This is the honest one.")
 
 
 def report(results):
@@ -102,18 +174,8 @@ def report(results):
         k = by_kind.setdefault(r["kind"], [])
         k.append(r)
 
-    print(f"\nGOLDEN SET: {len(results)} questions, retrieval only, no model\n")
-    print(f"{'kind':<12}{'pass':>8}   {'':<4}")
-    for kind in ("answer", "restricted", "absent"):
-        rs = by_kind.get(kind, [])
-        if not rs:
-            continue
-        good = sum(r["ok"] for r in rs)
-        pct = 100 * good / len(rs)
-        print(f"  {kind:<10}{good:>3}/{len(rs):<4}  {pct:5.1f}%")
-
-    total = sum(r["ok"] for r in results)
-    print(f"  {'TOTAL':<10}{total:>3}/{len(results):<4}  {100*total/len(results):5.1f}%")
+    print(f"\nGOLDEN SET: {len(results)} retrieval cases, no model, no network")
+    split_table(results)
 
     # The number ADR-7 promised to produce: how often does the "restricted
     # material exists" notice fire on a question that deserved a real answer or

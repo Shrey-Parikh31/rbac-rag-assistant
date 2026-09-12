@@ -1,6 +1,7 @@
 ---
 role: confidential
 title: Faculty Compensation Bands
+keywords: pay, wages, salary, compensation, earnings, how much professors make, faculty pay, adjunct pay, pay per credit hour, pay scale, pay bands, rank and pay, starting salary
 ---
 Assistant Professor: $78,000 to $96,000 depending on discipline and prior
 appointment. Associate Professor: $95,000 to $124,000. Full Professor:

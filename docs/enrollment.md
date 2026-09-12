@@ -1,6 +1,7 @@
 ---
 role: public
 title: Course Enrollment
+keywords: registering for classes, adding a class, signing up for courses, course registration, late registration, add drop deadline, course load, credit limit, taking extra credits, overloading a semester, enrollment deadline, registration fee
 ---
 Students may enroll in courses through the student portal during the open
 enrollment window. The window opens eight weeks before the semester begins and

@@ -129,18 +129,26 @@ def ask(question, role="student"):
     # the calls are recorded on the chat, not on the reply. Reading the wrong one
     # reports "no tools were used" for a turn that used them, which grades as a
     # model failure rather than as the measurement bug it is.
-    calls = []
+    # Both halves of each exchange. The results are recorded, not only the calls,
+    # because "did the answer state anything it was never shown" cannot be asked
+    # without knowing what it was shown.
+    calls, sources = [], []
     for message in chat.get_history():
         for part in (message.parts or []):
             if part.function_call:
                 calls.append({"name": part.function_call.name,
                               "args": dict(part.function_call.args)})
+            if part.function_response:
+                r = part.function_response.response or {}
+                sources.append({"name": part.function_response.name,
+                                "result": str(r.get("result", r))})
 
     usage = response.usage_metadata
     embed_s = round(rag.EMBED_SECONDS - embed_before, 2)
     total = time.monotonic() - started
     return {"text": response.text or "(no answer returned)",
             "tools": calls,
+            "sources": sources,
             "latency_s": round(total, 2),
             # Split, because "9 seconds" does not say which half to fix.
             "embed_s": embed_s,
@@ -154,7 +162,7 @@ def ask(question, role="student"):
 
 def _failed(text, status, started, retry_after=None):
     """Same shape as a success, so a caller never has to branch on the type."""
-    return {"text": text, "tools": [], "latency_s": round(time.monotonic() - started, 2),
+    return {"text": text, "tools": [], "sources": [], "latency_s": round(time.monotonic() - started, 2),
             "in_tokens": None, "out_tokens": None, "total_tokens": None,
             "model": MODEL, "status": status, "retry_after": retry_after}
 
