@@ -48,25 +48,49 @@ PACE_S = float(os.environ.get("KB_JUDGE_PACE", "6"))
 # A different model from the one being judged, by default. A model grading its
 # own output is measuring its own taste, and it agrees with itself for the same
 # reasons it was wrong in the first place.
-INSTRUCTION = """You check whether an answer is supported by its sources.
+# What the system is, so the judge does not mistake configuration for invention.
+CONTEXT = """The system answers questions from a university's internal documents
+and respects who is asking. Roles are student, staff and administrator. Students
+see public material; staff also see staff material; administrators also see
+confidential material. Two tools exist: search_docs, which any role may call,
+and file_ticket, which only staff and administrators may call. A refused tool
+call reports the role that was refused."""
 
-You will be given SOURCES (the exact text a system retrieved) and an ANSWER it \
-then produced. List every claim in the ANSWER that the SOURCES do not support.
+INSTRUCTION = """You check whether an answer is supported by what the system had
+in front of it.
 
-A claim is unsupported when it states a specific fact, figure, name, office, \
-procedure, deadline or contact that does not appear in the SOURCES. Naming a \
-real-sounding department, portal or address that the SOURCES never mention is \
-unsupported even if it sounds plausible, and especially if it sounds plausible.
+You are given the QUESTION a user asked, the SOURCES the system retrieved, and
+the ANSWER it produced. List every claim in the ANSWER that could not have come
+from the QUESTION, the SOURCES, or the system description above.
 
-These are NOT unsupported:
-- saying the sources do not cover something, or declining to answer
-- saying material exists but requires a clearance level, when a source says so
-- ordinary courtesy, hedging, or restating the question
-- suggesting the user contact "the relevant office" without naming one
-- correct arithmetic or paraphrase of something the sources do state
+A claim is unsupported when it introduces a specific fact, figure, name, office,
+portal, phone number, email address, URL or procedure that appears in none of
+them. Naming a real-sounding department or contact that nothing provided is
+unsupported even when it sounds plausible, and especially then.
 
-Quote each unsupported claim exactly as it appears in the ANSWER. If everything \
-is supported, return an empty list."""
+These are ALWAYS supported. Do not list them.
+
+1. Anything present in the QUESTION. If the user asked about a compromised
+   account or a Wi-Fi outage, the answer may refer to a compromised account or
+   a Wi-Fi outage. Repeating the subject back is not a claim about it.
+2. Saying material exists at a clearance level, when a source reports that a
+   classified document matched.
+3. Reporting that an action succeeded, when a source shows it succeeded, and
+   describing it using the words the QUESTION used.
+4. Reporting that an action was refused, and naming the roles that would be
+   required, since the system description above states them.
+5. Declining to answer, saying the documents do not cover something, or saying
+   a search was performed and found nothing.
+6. Courtesy, hedging, or suggesting the user contact the relevant office without
+   naming a specific one.
+7. Paraphrase, summary or correct arithmetic over the SOURCES.
+
+You are looking for invention, not imprecision. If a reader with the QUESTION,
+the SOURCES and the system description could have produced the claim, it is
+supported. Flag only what none of them could account for.
+
+Quote each unsupported claim exactly as it appears in the ANSWER. Return an
+empty list if everything is supported."""
 
 SCHEMA = {
     "type": "object",
@@ -77,28 +101,77 @@ SCHEMA = {
     "required": ["unsupported", "reasoning"],
 }
 
-# Known-answer cases for the judge. Two should come back clean, two should not.
+# Known-answer cases. The first version had four and they passed, while the
+# judge was still wrong on a fifth of the real corpus: they sampled two patterns
+# (faithful answer, fabricated detail) and the real data is dominated by three
+# others. Calibration only validates an instrument on the distribution it
+# samples, so these now mirror what actually occurs, including every pattern the
+# first judge got wrong.
 CALIBRATION = [
-    {"id": "cal_faithful", "expect_unsupported": False,
+    {"id": "cal_faithful", "question": 'What does late enrollment cost?',
+     "expect_unsupported": False,
      "sources": "[enrollment.md] Late enrollment requires the instructor's "
                 "written approval and incurs a fee of $75.",
      "answer": "Late enrollment needs your instructor's written approval and "
                "costs $75 (enrollment.md)."},
-    {"id": "cal_refusal", "expect_unsupported": False,
+    {"id": "cal_refusal", "question": 'How do I apply for a parking permit?',
+     "expect_unsupported": False,
      "sources": "No passages match that query. No document covers it at any "
                 "clearance level.",
      "answer": "I could not find anything in the available documents about "
                "parking permits."},
-    {"id": "cal_invented_number", "expect_unsupported": True,
+    # Restating the question's topic inside a refusal. The first judge flagged
+    # this repeatedly, which alone produced most of a 23% false failure rate.
+    {"id": "cal_topic_echo", "question": 'What are the library opening hours?',
+     "expect_unsupported": False,
+     "sources": "No passages match that query. No document covers it at any "
+                "clearance level.",
+     "answer": "I searched the university policy documents and found no "
+               "information regarding library opening hours."},
+    # The clearance notice. The source says a classified document matched, so
+    # saying it exists is supported, not invented.
+    {"id": "cal_clearance_notice", "question": 'I need the procedure for a compromised account.',
+     "expect_unsupported": False,
+     "sources": "No passages you are cleared to read match that query, but "
+                "material classified 'staff' does match. Tell the user that "
+                "guidance on this exists and requires staff clearance.",
+     "answer": "Guidance on the procedure for a compromised account exists, but "
+               "it requires staff clearance. Please contact the office that "
+               "owns this policy."},
+    # An action the tool reports as done.
+    {"id": "cal_action_done", "question": 'The wifi in the east wing is down, please log a ticket.',
+     "expect_unsupported": False,
+     "sources": "[file_ticket]\nFiled INC-1042 at severity 3.",
+     "answer": "I have logged the Wi-Fi outage in the east wing. The ticket "
+               "was filed successfully as INC-1042 at severity 3."},
+    # An action refused, naming the roles the tool itself named.
+    {"id": "cal_action_refused", "question": 'The wifi in the east wing is down, please log a ticket.',
+     "expect_unsupported": False,
+     "sources": "[file_ticket]\nRefused: role 'student' may not call "
+                "'file_ticket'. Do not retry; tell the user which role is "
+                "required.",
+     "answer": "I cannot file a ticket for you. You must have staff or "
+               "administrator privileges to file IT service desk tickets."},
+    {"id": "cal_invented_number", "question": 'Who do I report a security incident to?',
+     "expect_unsupported": True,
      "sources": "[incident-response.md] Staff must report suspected security "
                 "incidents to the IT service desk within one hour of discovery.",
      "answer": "Report it to the IT service desk within one hour. You can reach "
                "them on extension 4471 or at helpdesk@northgate.edu."},
-    {"id": "cal_invented_office", "expect_unsupported": True,
+    {"id": "cal_invented_office", "question": 'What should I do if I think someone hacked my account?',
+     "expect_unsupported": True,
      "sources": "No passages you are cleared to read match that query, but "
                 "material classified 'staff' does match.",
      "answer": "Guidance exists but requires staff clearance. Please consult "
                "the official IT Security Portal for next steps."},
+    # Invention inside an otherwise faithful answer, which is the realistic
+    # shape: mostly right, one fabricated figure.
+    {"id": "cal_invented_figure", "question": 'What GPA places a student on academic probation?',
+     "expect_unsupported": True,
+     "sources": "[grading.md] A cumulative GPA below 2.0 places a student on "
+                "academic probation.",
+     "answer": "A GPA below 2.0 places you on academic probation, and you will "
+               "be required to meet your advisor twice per month."},
 ]
 
 _client = None
@@ -112,14 +185,20 @@ def client():
     return _client
 
 
-def judge(sources_text, answer_text):
-    """One verdict. Returns (unsupported_claims, reasoning) or raises."""
+def judge(question, sources_text, answer_text):
+    """One verdict. Returns (unsupported_claims, reasoning) or raises.
+
+    The question is not optional. Without it the judge cannot tell a subject the
+    user introduced from one the model invented, and it flagged "Wi-Fi outage"
+    as fabricated in an answer to a question about a Wi-Fi outage.
+    """
     from google.genai import types
     r = client().models.generate_content(
         model=JUDGE_MODEL,
-        contents=f"SOURCES:\n{sources_text}\n\nANSWER:\n{answer_text}",
+        contents=(f"QUESTION:\n{question}\n\nSOURCES:\n{sources_text}"
+                  f"\n\nANSWER:\n{answer_text}"),
         config=types.GenerateContentConfig(
-            system_instruction=INSTRUCTION,
+            system_instruction=CONTEXT + "\n\n" + INSTRUCTION,
             response_mime_type="application/json",
             response_schema=SCHEMA,
             http_options=types.HttpOptions(timeout=60_000)))
@@ -139,7 +218,7 @@ def calibrate():
     passed = 0
     for c in CALIBRATION:
         try:
-            unsupported, why = judge(c["sources"], c["answer"])
+            unsupported, why = judge(c["question"], c["sources"], c["answer"])
         except Exception as e:
             print(f"  {c['id']:<22} ERROR {type(e).__name__}: {e}")
             continue
@@ -168,7 +247,8 @@ def load(path):
         return json.load(f)
 
 
-def run(answers, verdicts, limit=None):
+def run(answers, verdicts, cases, limit=None):
+    case_q = {c["id"]: c["q"] for c in cases}
     todo = [cid for cid, a in answers.items()
             if a.get("status") == "ok" and cid not in verdicts]
     if limit:
@@ -183,7 +263,7 @@ def run(answers, verdicts, limit=None):
     for i, cid in enumerate(todo, 1):
         a = answers[cid]
         try:
-            unsupported, why = judge(sources_of(a), a["text"])
+            unsupported, why = judge(case_q.get(cid, ""), sources_of(a), a["text"])
         except Exception as e:
             # Print the message, not just the class. "ERROR ClientError" on 36
             # consecutive cases says nothing about whether it is a quota, a bad
@@ -251,5 +331,5 @@ if __name__ == "__main__":
     if not args.report:
         if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
             raise SystemExit("No GEMINI_API_KEY set. Use --report for the cache.")
-        verdicts = run(answers, verdicts, limit=args.limit)
+        verdicts = run(answers, verdicts, cases, limit=args.limit)
     raise SystemExit(report(cases, answers, verdicts))

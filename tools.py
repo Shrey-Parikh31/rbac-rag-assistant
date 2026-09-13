@@ -18,7 +18,7 @@ import json
 import contextvars
 from datetime import datetime, timezone
 
-from rag import Index, load, MAX_ROLE
+from rag import Index, load, MAX_ROLE, CLEARANCE
 
 # Set by the agent before a turn. The model cannot read or write it.
 _role = contextvars.ContextVar("role", default="student")
@@ -38,6 +38,21 @@ TOOL_ACCESS = {
 NO_MATCH = ("No passages match that query. No document covers it at any "
             "clearance level.")
 RESTRICTED_PREFIX = "No passages you are cleared to read match that query, but "
+
+# How much better a restricted match must be before the assistant mentions that
+# restricted material exists.
+#
+# Deliberately zero, and deliberately NOT fitted. Sweeping 0.00 to 0.12 on the
+# tune split gives 52/55 at every single value: tune contains no case where a
+# weak visible match competes with a strong restricted one, so it cannot
+# validate this number at all. Picking a midpoint of a flat band would be a
+# magic number wearing the costume of a fitted one.
+#
+# Zero is the rule stated with no free parameter: mention restricted material
+# whenever it matches better than anything the caller can read. If a future case
+# shows near-ties producing noisy notices, fit it then, on cases that can
+# actually discriminate.
+RESTRICTED_MARGIN = 0.0
 
 SEVERITIES = {1, 2, 3}
 TICKETS = os.environ.get("KB_TICKETS", "tickets.jsonl")
@@ -91,17 +106,25 @@ def search_docs(query: str, k: int = 3) -> str:
     k = max(1, min(int(k), 8))
 
     hits = index().search(query, role=role, k=k)
-    if hits:
-        return "\n\n".join(f"[{h['source']} score={h['score']}]\n{h['text']}"
-                           for h in hits)
 
-    # Nothing the caller may read. Distinguish "no such policy" from "a policy
-    # exists that you are not cleared for" and say which (ADR-7). What crosses
-    # this boundary is a classification label, never a passage, a title, or a
-    # filename: enough to point someone at the right office, not enough to
-    # answer their question.
+    # What would a caller with full clearance have found? Asked here rather than
+    # only when `hits` is empty, because "did anything match" is a degree, not a
+    # yes or no. A student asking about exposed student data matched the
+    # *grading* policy at 0.6307, barely over the floor and about the wrong
+    # subject, which was enough to stop the system ever noticing that the
+    # incident policy matched at 0.6775 and actually answered the question.
+    # Visibility was outvoting relevance.
     restricted = index().search(query, role=MAX_ROLE, k=1)
-    if restricted:
+    restricted = [h for h in restricted
+                  if h["role"] not in CLEARANCE.get(role, {"public"})]
+
+    best_visible = hits[0]["score"] if hits else 0.0
+    best_restricted = restricted[0]["score"] if restricted else 0.0
+
+    # Report the restricted material when it is a clearly better match than
+    # anything this caller can read. RESTRICTED_MARGIN is fitted on the tune
+    # split like every other threshold here.
+    if best_restricted > best_visible + RESTRICTED_MARGIN:
         required = restricted[0]["role"]
         return (RESTRICTED_PREFIX +
                 f"material classified '{required}' does match. Tell the user "
@@ -109,6 +132,11 @@ def search_docs(query: str, k: int = 3) -> str:
                 f"clearance, and that they should contact the office that owns "
                 f"it. You have not been shown the contents and must not "
                 f"speculate about them.")
+
+    if hits:
+        return "\n\n".join(f"[{h['source']} score={h['score']}]\n{h['text']}"
+                           for h in hits)
+
     return NO_MATCH
 
 

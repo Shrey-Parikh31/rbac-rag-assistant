@@ -343,3 +343,48 @@ finding *and* better at refusing, with the plural bug fixed. This decision is
 kept because the prediction it makes was tested and held, and because the
 character-n-gram result is still the clearest illustration in this project of a
 headline number hiding a real trade.
+
+---
+
+## ADR-11: Compare visible against restricted, rather than short-circuiting
+
+**Status:** accepted
+
+**Context.** ADR-7 says a caller should be told when material exists that they
+are not cleared to read. The mechanism was: search what the caller may see, and
+*if nothing matches*, search everything and report that something restricted
+matched.
+
+That treats "did anything match" as a yes or no when it is a degree. A student
+asking what happens when student data is exposed matched the **grading** policy
+at 0.6307, barely over the floor and about the wrong subject entirely. Having
+found something, the system never looked further. The incident policy, which
+actually answers the question, scored 0.6775 and was never consulted. Visibility
+was outvoting relevance.
+
+The model then behaved correctly: it read a document about grades, saw it did not
+answer the question, and said so. The student was told no information exists
+about a topic the institution has a written procedure for.
+
+**Decision.** `search_docs` always computes both the best visible match and the
+best restricted match, and reports restricted material whenever it scores higher.
+
+**Consequences.** Retrieval `restricted` went 14/15 to 15/15, and held-out total
+93.3%. No new false notices appeared: the one remaining is q029, which is a
+known and deliberately retained failure.
+
+`RESTRICTED_MARGIN` is **zero and deliberately unfitted**. Sweeping 0.00 to 0.12
+gives an identical 52/55 on tune at every value, because tune contains no case
+where a weak visible match competes with a strong restricted one. A midpoint of a
+flat band would be a magic number dressed as a fitted one, so the rule is stated
+with no free parameter: mention restricted material when it matches better.
+
+**Honest caveat.** This flaw was noticed through a held-out case. The mechanism
+was fixed rather than the case, and nothing was fitted on test, but the test
+split is marginally less independent for this change than for the others. The
+remedy is tune cases exercising this pattern, so the next change can be
+validated rather than argued.
+
+**Reversed if:** near-ties start producing noisy notices on real traffic, at
+which point the margin becomes a real parameter and gets fitted on cases that
+can actually discriminate.
