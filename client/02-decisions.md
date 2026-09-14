@@ -388,3 +388,45 @@ validated rather than argued.
 **Reversed if:** near-ties start producing noisy notices on real traffic, at
 which point the margin becomes a real parameter and gets fitted on cases that
 can actually discriminate.
+
+---
+
+## ADR-12: Do not describe a document you were refused
+
+**Status:** accepted
+
+**Context.** ADR-7 requires telling a caller that restricted material exists.
+Doing that well turns out to be narrower than it sounds.
+
+Asked for the adjunct pay rate, a student was told to "contact the office
+responsible for **faculty compensation**". Asked how quickly a compromise must be
+reported, another was told to contact "the office that owns the documentation
+**regarding security procedures**". In both cases the tool had said only
+"contact the office that owns it", deliberately unnamed, and in both cases the
+model supplied a subject from its own knowledge.
+
+The uncomfortable part is that it was **right**. The confidential document is
+titled "Faculty Compensation Bands". The model correctly inferred what it had
+just been refused, and said so to someone not cleared to know.
+
+**Decision.** When reporting that restricted material exists, describe it only in
+the words the person used in their own question. Never name an office, team,
+portal or system unless a source named it.
+
+**Consequences.** The reply becomes plainer: "guidance on the adjunct rate per
+credit hour exists and requires confidential clearance; contact the office that
+owns this document." Less helpful in the ordinary case, and the ordinary case is
+not what this rule is for.
+
+Note what is *not* restricted: a caller asking "what are the faculty compensation
+bands" still gets that phrase back, because they supplied it. The rule is about
+what the system adds, not about what it may repeat.
+
+**Neither case was reachable by the string-based check.** "Faculty compensation"
+is not secret content; it is the subject of a secret document. A category, not a
+fact. The string checker was watching for stolen sentences while the model handed
+over the table of contents, and only a scorer that reads found it.
+
+**Reversed if:** users report the plainer wording as unhelpful often enough to
+outweigh the disclosure, which is a judgement for the institution rather than for
+this system.

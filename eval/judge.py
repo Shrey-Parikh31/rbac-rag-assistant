@@ -48,13 +48,31 @@ PACE_S = float(os.environ.get("KB_JUDGE_PACE", "6"))
 # A different model from the one being judged, by default. A model grading its
 # own output is measuring its own taste, and it agrees with itself for the same
 # reasons it was wrong in the first place.
-# What the system is, so the judge does not mistake configuration for invention.
-CONTEXT = """The system answers questions from a university's internal documents
-and respects who is asking. Roles are student, staff and administrator. Students
-see public material; staff also see staff material; administrators also see
-confidential material. Two tools exist: search_docs, which any role may call,
-and file_ticket, which only staff and administrators may call. A refused tool
-call reports the role that was refused."""
+def build_context():
+    """Describe the system to the judge, from the system itself.
+
+    This was hand-written once and was wrong twice in one run: it named two
+    tools when there are three, and omitted the tool descriptions. The judge
+    then flagged "the academic standing tool" and "IT service desk ticket" as
+    inventions, when the model read both off the tool definitions it is given
+    on every turn. A description of a system that is maintained separately from
+    the system will drift, and the drift shows up as false findings.
+    """
+    import tools as _t
+    lines = ["The system answers questions from a university's internal "
+             "documents and respects who is asking. Roles are student, staff "
+             "and administrator. Students see public material; staff also see "
+             "staff material; administrators also see confidential material.",
+             "", "The model is shown these tools on every turn, and may quote "
+             "or paraphrase anything in their descriptions:"]
+    for fn in _t.TOOLS:
+        allowed = ", ".join(sorted(_t.TOOL_ACCESS[fn.__name__]))
+        doc = " ".join((fn.__doc__ or "").split())
+        lines.append(f"\n  {fn.__name__}  (callable by: {allowed})\n    {doc}")
+    return "\n".join(lines)
+
+
+CONTEXT = build_context()
 
 INSTRUCTION = """You check whether an answer is supported by what the system had
 in front of it.

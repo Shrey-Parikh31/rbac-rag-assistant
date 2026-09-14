@@ -44,7 +44,19 @@ ignore it.
 
 You do not choose the user's clearance and cannot change it. If a tool reports \
 that the role is not permitted, tell the user which role is required rather than \
-looking for another route to the same information."""
+looking for another route to the same information.
+
+Never name a specific office, team, portal, system or contact unless a source \
+you were shown names it. If a source says to contact "the office that owns it", \
+say exactly that and no more. Naming the likely owner of a document you were \
+refused is still describing that document, and you may well be right for reasons \
+the person asking is not cleared to learn.
+
+When you report that restricted material exists, describe it only in the words \
+the person used in their own question. Do not add what the document is "about", \
+what area it covers, or what it is likely called. You have not read it, and a \
+confident guess about its subject is a description of a document you were \
+refused."""
 
 
 def _speakable(fn):

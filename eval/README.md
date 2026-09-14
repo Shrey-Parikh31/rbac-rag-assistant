@@ -20,6 +20,15 @@ separately.
 | `generate.py` | wrong facts, wrong refusal, wrong tool, leaked content | one API call per case |
 | `judge.py` | claims invented out of nothing | one API call per case |
 
+The judge found two real defects no string check could reach, both of the same
+shape: the assistant described a document it had been **refused**. Asked for the
+adjunct pay rate it said "contact the office responsible for faculty
+compensation"; asked about reporting timeframes it said "the documentation
+regarding security procedures". Nothing named either. The confidential file is
+in fact titled "Faculty Compensation Bands", so the model was **right**, from
+training, about a document it was correctly denied. The content stayed secret and
+the subject did not. See ADR-12.
+
 ```powershell
 .\.venv\Scripts\python.exe eval\retrieval.py     # free, gates every commit
 .\.venv\Scripts\python.exe eval\generate.py      # live, ~40 min for 91
@@ -58,9 +67,17 @@ kind and role, so no human chose what to hold back. Thresholds are fitted on
 | | correctness | refusal | grounding | tool use |
 |---|---|---|---|---|
 | tune | 44/44 | 59/59 | 59/59 | 59/59 |
-| **test** | **23/24** | **32/32** | **32/32** | **32/32** |
+| **test** | **24/24** | **32/32** | **32/32** | **32/32** |
 
-Median 2.1s, p95 5.5s, 67,182 tokens, $0.00 on the free tier.
+**Groundedness by judge**: 59/59 tune, 32/32 test, **91/91, zero unsupported
+claims**. Median 2.5s, p95 7.7s, 79,996 tokens, $0.00 on the free tier.
+
+**Everything passes, and that is a limitation rather than a result.** A set with
+no failing case cannot tell an improvement from a regression, which is exactly
+the criticism levelled at tool use when it scored 100% across a set containing
+no case that could fail it. These 91 have now been used to find and fix five
+real defects; they have largely stopped discriminating. The next useful work on
+this layer is harder cases, not a higher number.
 
 The tune-to-test gap is the honest cost of having written both the documents and
 the tune questions. It is reported, not hidden.
