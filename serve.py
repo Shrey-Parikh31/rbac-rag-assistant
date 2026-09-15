@@ -69,6 +69,16 @@ class Handler(BaseHTTPRequestHandler):
     # load test then measures the handshake as if it were the application.
     protocol_version = "HTTP/1.1"
 
+    # TCP_NODELAY, and the load test is what found it. The first k6 run reported
+    # p95 40.94ms, p90 40.93ms, median 40.91ms, min 1.75ms: a distribution with
+    # no spread at all is not a workload, it is a constant, and ~40ms is the
+    # Linux delayed-ACK timer. http.server flushes the headers in one write and
+    # the body in another, so Nagle's algorithm holds the second segment waiting
+    # for an acknowledgement the client will not send for 40ms because it is
+    # waiting for more data. Every request paid it, and retrieval itself takes
+    # under 2ms.
+    disable_nagle_algorithm = True
+
     def _send(self, code, body):
         # Anything the caller sent and we did not read has to be drained, or the
         # connection is closed with bytes still in flight and the client sees a
