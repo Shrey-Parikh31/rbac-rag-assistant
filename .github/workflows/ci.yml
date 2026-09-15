@@ -91,7 +91,7 @@ jobs:
       # The gate. CRITICAL fails the build; the image does not get published and
       # nothing downstream runs.
       - name: trivy, critical
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:${{ github.sha }}
           severity: CRITICAL
@@ -103,7 +103,7 @@ jobs:
       # gate that gets bypassed with a flag.
       - name: trivy, high, reported not enforced
         if: always()
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:${{ github.sha }}
           severity: HIGH
