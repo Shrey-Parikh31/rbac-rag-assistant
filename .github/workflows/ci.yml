@@ -143,6 +143,83 @@ jobs:
         if: always()
         run: docker logs kb || true
 
+      # ------------------------------------------------------------- cluster
+      # A real Kubernetes cluster, built inside this runner, used for two
+      # minutes and thrown away. kind and kubectl are both preinstalled, so this
+      # costs nothing and installs nothing.
+      #
+      # It exists to answer the questions a managed cluster would cost $73 a
+      # month to answer: does a rolling update work, does a killed pod come
+      # back, and does a deployment that cannot start get refused rather than
+      # taking the service down with it.
+      - name: build a throwaway cluster
+        run: |
+          docker rm -f kb                        # free port 8080 for the forward
+          kind create cluster --name ci --wait 90s
+          kind load docker-image --name ci "$IMAGE:${{ github.sha }}"
+
+      - name: deploy
+        run: |
+          # The token map arrives as a Secret created here rather than as a
+          # field in the manifest. Credentials in a file in git is the failure
+          # this whole repository is about.
+          kubectl create secret generic kb-tokens --from-literal=KB_TOKENS="$KB_TOKENS"
+          sed "s|IMAGE_PLACEHOLDER|$IMAGE:${{ github.sha }}|" deploy/k8s.yaml | kubectl apply -f -
+          kubectl rollout status deploy/kb --timeout=120s
+          kubectl get pods -o wide
+
+      - name: smoke test through the service
+        run: |
+          kubectl port-forward svc/kb 8080:80 > /dev/null 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8080/healthz >/dev/null && break; sleep 1; done
+          python3 test_serve.py http://localhost:8080
+
+      # Deliberately kill a pod. Kubernetes is supposed to notice and replace
+      # it; asserting that it does is the difference between believing the
+      # manifest and having watched it work.
+      - name: kill a pod and watch it come back
+        run: |
+          victim=$(kubectl get pods -l app=kb -o name | head -1)
+          echo "deleting $victim"
+          kubectl delete "$victim" --wait=false
+          sleep 2
+          kubectl wait --for=condition=ready pod -l app=kb --timeout=90s
+          ready=$(kubectl get deploy kb -o jsonpath='{.status.readyReplicas}')
+          test "$ready" = "2" || { echo "expected 2 ready replicas, got '$ready'"; exit 1; }
+          curl -sf localhost:8080/healthz && echo "  still serving"
+
+      # The rollback. A deployment that cannot possibly start is pushed, and
+      # three things have to be true: the rollout is refused, the service keeps
+      # answering from the old pods throughout, and undo restores it.
+      #
+      # The `if kubectl rollout status` inversion is the important line. A
+      # rollback test that never sees a failed rollout proves nothing, which is
+      # the same vacuous shape as an access test that passes because nothing was
+      # retrieved -- and this project has now shipped that mistake sixteen times.
+      - name: prove the rollback
+        run: |
+          kubectl set image deploy/kb kb="$IMAGE:this-tag-does-not-exist"
+          if kubectl rollout status deploy/kb --timeout=75s; then
+            echo "FAIL: an unstartable image rolled out successfully"; exit 1
+          fi
+          echo "rollout refused, as it should be"
+
+          # maxUnavailable is 0, so the old pods were never taken away.
+          curl -sf localhost:8080/healthz || { echo "FAIL: service went down during a failed deploy"; exit 1; }
+          echo "service stayed up throughout the failed deploy"
+
+          kubectl rollout undo deploy/kb
+          kubectl rollout status deploy/kb --timeout=90s
+          python3 test_serve.py http://localhost:8080
+          echo "rolled back and serving correctly"
+
+      - name: what the cluster saw
+        if: always()
+        run: |
+          kubectl get pods -o wide || true
+          kubectl describe deploy kb | tail -25 || true
+          kubectl logs -l app=kb --tail=20 --all-containers || true
+
       # Only after every gate above has passed, and only from main. A pull
       # request gets the full verdict and publishes nothing.
       - name: publish

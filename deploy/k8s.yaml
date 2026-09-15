@@ -1,0 +1,99 @@
+# What "three copies of this, always" looks like written down.
+#
+# The pipeline applies this to a throwaway Kubernetes cluster built inside the
+# CI runner, proves the service comes up, kills a pod to show it heals, then
+# deploys a deliberately broken image to show the rollback works. The cluster
+# is deleted two minutes later, so the whole thing costs nothing.
+#
+# A simulator rather than a flight: nobody outside the runner can reach it. What
+# it does prove is the part that is actually hard to get right, which is what
+# happens when something breaks at three in the morning.
+#
+# The image tag is substituted by CI. Left as a placeholder on purpose, because a
+# manifest with a hardcoded tag gets deployed months stale by somebody in a hurry.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kb
+  labels: { app: kb }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: kb }
+  # Without this a rollout that can never succeed waits forever, and "forever"
+  # in a pipeline means "until the job times out", which reads as a broken
+  # pipeline rather than as a refused deployment. Ten minutes is the default;
+  # sixty seconds is long enough for a real rollout here and short enough that a
+  # failure is a failure while somebody is still watching.
+  progressDeadlineSeconds: 60
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never drop below the current capacity while replacing: add one, then
+      # take one away. maxUnavailable: 1 would serve the whole rollout at half
+      # strength, which is how a deploy becomes an incident under load.
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels: { app: kb }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: kb
+          image: IMAGE_PLACEHOLDER
+          # The image is side-loaded into the cluster rather than pulled from a
+          # registry, so an attempt to pull is a mistake worth failing on.
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            # The tool that writes tickets needs somewhere to write. Everything
+            # else is read-only, which is why the root filesystem can be.
+            - name: KB_TICKETS
+              value: /tmp/tickets.jsonl
+          envFrom:
+            - secretRef: { name: kb-tokens }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          # Readiness and liveness are different questions and answering them
+          # with one probe is a common way to build a crash loop. Readiness: may
+          # this pod receive traffic yet? The index takes a moment to build, and
+          # a pod that receives a request before it is built serves an error.
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 3
+            failureThreshold: 3
+          # Liveness: is this pod wedged and worth killing? Deliberately slower
+          # and more forgiving, because a liveness probe that is too eager
+          # restarts a busy service and turns a slow afternoon into an outage.
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+      volumes:
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kb
+spec:
+  selector: { app: kb }
+  ports:
+    - port: 80
+      targetPort: 8080
