@@ -1,0 +1,11 @@
+# Everything is excluded and the Dockerfile names what it wants. The opposite
+# order is how a .env or a private key ends up in a published layer: one new
+# file nobody remembered to exclude.
+*
+!requirements.txt
+!rag.py
+!tools.py
+!agent.py
+!serve.py
+!vectors.json
+!docs/

@@ -1,0 +1,64 @@
+# The live evaluation: every golden question through the real model, then the
+# judge over the answers.
+#
+# Run by hand, never on a push, and that is a quota decision rather than a
+# design preference. The free tier allows 20 requests per day per model; one
+# question costs two or three, so a full run is roughly 250 and has to be paced
+# across hours. Wiring that to every commit would mean every commit after the
+# first failing for a reason that has nothing to do with the commit.
+#
+# What gates per push is eval/retrieval.py, which scores the half of the problem
+# that needs no model and therefore has no quota. This is the other half, run
+# when a prompt or a model actually changes.
+name: eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model to evaluate (KB_MODEL)"
+        default: "gemini-3.1-flash-lite"
+      pace:
+        description: "Seconds between questions, to stay under the rate limit"
+        default: "25"
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: refuse to start without credentials
+        run: |
+          if [ -z "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "GEMINI_API_KEY is not set as a repository secret."
+            echo "Settings -> Secrets and variables -> Actions -> New repository secret."
+            exit 1
+          fi
+
+      - name: answer every question
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          KB_MODEL: ${{ inputs.model }}
+          KB_PACE: ${{ inputs.pace }}
+        run: python eval/generate.py
+
+      - name: judge the answers
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python eval/judge.py
+
+      # eval/runs/ is gitignored, so without this the run leaves nothing behind
+      # and the numbers exist only in a log that expires.
+      - name: keep the answers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ inputs.model }}-${{ github.run_number }}
+          path: eval/runs/

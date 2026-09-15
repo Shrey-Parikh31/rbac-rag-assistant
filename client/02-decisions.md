@@ -430,3 +430,116 @@ over the table of contents, and only a scorer that reads found it.
 **Reversed if:** users report the plainer wording as unhelpful often enough to
 outweigh the disclosure, which is a judgement for the institution rather than for
 this system.
+
+---
+
+## ADR-13: The caller's role comes from their token, never from the request
+
+**Status:** accepted
+
+**Context.** Layers 1, 2 and 5 all need an HTTP endpoint -- a load test needs
+something to put pressure on, a chaos experiment needs a process to kill
+mid-request, a trace needs a request boundary. `serve.py` is that endpoint.
+
+`mcp_server.py` reads one role from `KB_ROLE` at startup, which is honest for
+MCP because a connection is one user. HTTP is many users through one process, so
+the role has to be decided per request, and the obvious cheap option is a header.
+
+`X-Role: admin` is not authentication. It is a text box in which the caller
+writes their own clearance.
+
+**Decision.** `Authorization: Bearer <token>`, with a token-to-role map supplied
+in `KB_TOKENS`. A missing or malformed map is fatal at startup. There is no
+development mode that trusts a header.
+
+**Consequences.** Running the server locally requires one environment variable,
+which is friction, and the friction is the point: the bypass written for
+convenience is the one that reaches production. `test_serve.py` sends
+`Authorization: Bearer <student token>` together with `X-Role: admin` and asserts
+the reply is still a student's.
+
+The token map is a demonstration, not a credential system. A real deployment
+puts an identity provider in front and maps a verified claim to a role; what
+would not change is that the role is derived from something the caller cannot
+write.
+
+**Also tested here for the first time: the rule under concurrency.** The role is
+bound to a `contextvar`, and a threaded server handles each request in its own
+thread. If that binding ever leaked across threads, a student request arriving
+beside a staff request could be answered from staff material, and no
+single-threaded test could see it. `test_serve.py` runs forty interleaved
+requests at alternating clearance and asserts every reply matches its asker.
+
+---
+
+## ADR-14: The quality gate compares cases, not percentages
+
+**Status:** accepted
+
+**Context.** Layer 3 produces a retrieval score. Layer 1 has to turn it into
+something that can refuse a release. The obvious form is a threshold: fail if
+accuracy drops below the recorded number.
+
+A percentage cannot see a swap. Fix one case, break another, and the score is
+identical while the system has quietly changed who it fails. It also moves every
+time a question is added, so a larger golden set looks like a regression, and the
+fix for that is a tolerance, and a tolerance is a hole sized in advance.
+
+**Decision.** `eval/baseline.json` records the *set of case ids that pass*. The
+gate fails if any of them stops passing. New cases are reported and not gated
+until a human runs `--accept`, which is a separate command and therefore a commit
+somebody can see in a diff.
+
+**This only works because the scorer is deterministic** -- cached vectors, no
+model, no sampling -- so a case that changes verdict changed for a reason. The
+same gate over a live model would fire on resampling noise and be switched off
+inside a week, which is the ordinary way a quality gate dies. The live
+evaluation therefore runs on demand and reports; the offline one gates.
+
+**Verified by breaking it on purpose.** Raising `MIN_SCORE` from 0.61 to 0.68
+made the gate exit 1 and name fifteen regressed cases -- while also reporting
+four cases that *improved*. A percentage gate would have netted those off. After
+Layer 3, a gate nobody has watched fail is not a gate.
+
+---
+
+## ADR-15: No Playwright, because there is no interface to drive
+
+**Status:** accepted
+
+**Context.** The roadmap lists an end-to-end test with Playwright. Playwright
+drives a browser, and this system has no browser interface: it is a retrieval
+library, an agent loop, an MCP server and now an HTTP API.
+
+**Decision.** The end-to-end test is `test_serve.py` run against the running
+container, over HTTP, through the same interface a client would use.
+
+**Consequences.** Adding Playwright would mean first building a web page for
+Playwright to click, which is a user interface invented to justify a tool rather
+than to serve a user. The test coverage would be identical and the deployed
+surface larger.
+
+What is genuinely lost: this does not test a real client's rendering or its
+handling of a slow response. That matters when there is a client. There is not.
+
+---
+
+## ADR-16: Critical CVEs block the build, high ones do not
+
+**Status:** accepted
+
+**Context.** Trivy scans the image on every build. The temptation is to fail on
+everything it finds.
+
+A `slim` base image usually carries a handful of HIGH findings in system
+libraries with no patched version available this week. A gate that cannot be
+satisfied by any action the team can take is a gate that gets bypassed, and the
+bypass is permanent while the CVE is temporary.
+
+**Decision.** CRITICAL with a fix available fails the build. HIGH is reported in
+the log and does not. `--ignore-unfixed` on the blocking scan.
+
+**Consequences.** A critical vulnerability with no available patch does not block
+a release, which is the uncomfortable half of this decision and is stated here
+rather than hidden in a flag. The alternative is blocking every release until
+somebody else ships a fix, which does not make the vulnerability smaller.

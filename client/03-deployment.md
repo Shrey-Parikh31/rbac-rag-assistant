@@ -77,6 +77,40 @@ As an MCP server, for use from an existing client:
 }
 ```
 
+As a service, for anything that speaks HTTP:
+
+```bash
+docker run -d -p 8080:8080 \
+  -e KB_TOKENS="$(cat /run/secrets/kb_tokens)" \
+  -e GEMINI_API_KEY="$(cat /run/secrets/gemini_key)" \
+  ghcr.io/shrey-parikh31/rbac-rag-assistant:latest
+```
+
+`KB_TOKENS` is a comma-separated list of `token:role` pairs, and the container
+**will not start without it**. Each caller sends their own token:
+
+```bash
+curl -H "Authorization: Bearer <that person's token>" \
+     "http://<host>:8080/search?q=how+late+can+I+enroll"
+```
+
+Three things to know before this goes in front of anyone:
+
+1. **The token is the clearance.** Anyone holding a staff token is staff. Treat
+   the list the way you treat passwords, and issue one token per person rather
+   than one per role, so a single revocation does not lock out a department.
+2. **Rotation is a restart.** The map is read once at startup. Replace the secret
+   and restart. There is deliberately no reload endpoint: an endpoint that
+   changes who can see what is an endpoint worth attacking.
+3. **This is not an identity provider.** For real use, put your existing SSO in
+   front and map a verified group claim to a role. What should not change is that
+   the role is derived from something the caller cannot write for themselves.
+
+`GET /healthz` is unauthenticated and reports only that the process is up with
+its index built, so point your load balancer at it. `GET /search` needs no model
+credentials at all; only `POST /ask` does, and without them it returns `503` with
+an explanation rather than failing.
+
 ## Updating the corpus
 
 Add or edit a markdown file in `docs/`. Front matter sets the sensitivity level:

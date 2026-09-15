@@ -286,3 +286,60 @@ catches a missing figure, not a well-written wrong explanation.
 **91 cases is small.** A one-case difference is noise, and several decisions here
 rest on differences of one or two. Widen the set before trusting any third
 decimal place.
+
+---
+
+## Wiring it into the build (Layer 1)
+
+```
+python eval/retrieval.py --gate     exit 1 on a regression or a leak
+python eval/retrieval.py --accept   record current behaviour as the bar
+```
+
+`eval/baseline.json` holds the **set of case ids that pass**, not a score.
+ADR-14 has the argument; the short version is that a percentage cannot see a
+swap, and it moves whenever a question is added, so a bigger golden set reads as
+a regression and the fix for that is a tolerance sized in advance.
+
+New cases are reported and not gated until somebody runs `--accept`. That is a
+separate command on purpose: a gate that updates its own baseline when it fails
+measures nothing, so lowering the bar has to appear in a diff.
+
+**It has been watched failing.** Raising `MIN_SCORE` from 0.61 to 0.68 produced
+exit 1, fifteen named regressions, and four improvements — and that combination
+is the case for this design, because a percentage gate would have reported the
+net and blocked nothing.
+
+This gate is affordable per push only because the scorer needs no model. The
+live evaluation in `eval/generate.py` and `eval/judge.py` costs roughly 250 model
+requests against a free tier of 20 per day **per model**, so it runs on demand
+from `.github/workflows/eval.yml` and reports. The offline one gates.
+
+### Instrument bug fifteen
+
+The gate passed the first time it was run, on a golden set where every case
+already passed. That is the same shape as the access-control test that passed
+because nothing could be retrieved, and the tool-use metric that read 100% on a
+set containing no case that could fail it. A gate is not known to work until it
+has refused something, which is why breaking `MIN_SCORE` on purpose is written
+down above as a step rather than remembered as a thing that was probably done.
+
+### Instrument bug sixteen
+
+`test_serve.py` started a server on a fixed port and waited for `/healthz` to
+answer. A server left running from an earlier session answers instantly, so the
+spawn loop saw a healthy service and the whole suite tested **the stale process**
+— its code, and its credentials.
+
+It was caught by a question that should have been impossible. The suite is meant
+to prove the system serves retrieval with no API key, and a question with no
+cached vector got embedded anyway. Six abandoned servers were listening, one of
+them started with a key in its environment.
+
+The port is now requested from the operating system, which removes the collision
+rather than detecting it, and the spawn loop notices a server that exits
+immediately instead of waiting thirty seconds to say nothing useful.
+
+Same family as the other fifteen. A test that connects to something other than
+the thing it started passes for a reason unrelated to the code under test, and
+the passing looks exactly like the real thing.

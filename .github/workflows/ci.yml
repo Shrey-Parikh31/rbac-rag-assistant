@@ -1,0 +1,151 @@
+# The gate.
+#
+# Five jobs, and the only ones that matter are the ones that can say no. A
+# pipeline that runs a scanner and prints its findings is a newsletter. This one
+# refuses to publish an image when a case that used to pass stops passing, when
+# p95 leaves its budget, or when a critical CVE is present.
+#
+# Everything on the fast path runs without an API key. Retrieval scoring uses
+# the committed vectors, the tests use no model at all, and the container serves
+# /search with no credentials. That is what makes it affordable to gate on
+# quality per push instead of per release: the free tier allows 20 model
+# requests per day per model, so a live evaluation in this workflow would be
+# exhausted before lunch. eval/generate.py runs on a schedule instead.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Development tokens, and they are in the repository on purpose: they only
+  # exist inside a container this workflow starts and kills. A real deployment
+  # takes them from a secret store, which is what client/03-deployment.md says.
+  KB_TOKENS: "devstudent:student,devstaff:staff,devadmin:admin"
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  # --------------------------------------------------------------- unit + gate
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # Plain assert scripts, no test framework. They run in a second and they
+      # fail with the line that broke, which is the whole job of a unit test.
+      - name: unit tests
+        run: |
+          python test_rag.py
+          python test_tools.py
+
+      - name: http end to end, against a local server
+        run: python test_serve.py
+
+      # The regression gate. Per case, not per percentage: see the docstring in
+      # eval/retrieval.py for why a percentage cannot see a swap.
+      - name: retrieval regression gate
+        run: python eval/retrieval.py --gate
+
+      # Not a gate. The full table is worth having in the log when the gate
+      # fails, so whoever reads it can see what else moved.
+      - name: full retrieval report
+        if: always()
+        run: python eval/retrieval.py
+
+  # ------------------------------------------------------------ static analysis
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install semgrep
+      # --error makes a finding fail the job. p/secrets is the rule set that
+      # earns its place here: this repository's whole subject is material that
+      # must not reach the wrong reader, and a committed key is the shortest
+      # path to exactly that.
+      - name: semgrep
+        run: semgrep --config=p/python --config=p/secrets --error --metrics=off .
+
+  # ---------------------------------------------------- build, scan, load, ship
+  image:
+    runs-on: ubuntu-latest
+    needs: [quality, static]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build
+        run: docker build -t "$IMAGE:${{ github.sha }}" .
+
+      # The gate. CRITICAL fails the build; the image does not get published and
+      # nothing downstream runs.
+      - name: trivy, critical
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true   # a CVE with no patch is not a merge to block on
+
+      # Report only. HIGH findings in a base image are frequently unfixable this
+      # week and fixable next week, and a gate that cannot be satisfied is a
+      # gate that gets bypassed with a flag.
+      - name: trivy, high, reported not enforced
+        if: always()
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.IMAGE }}:${{ github.sha }}
+          severity: HIGH
+          exit-code: "0"
+
+      - name: start the container
+        run: |
+          docker run -d --name kb -p 8080:8080 \
+            -e KB_TOKENS="$KB_TOKENS" "$IMAGE:${{ github.sha }}"
+          for i in $(seq 1 40); do
+            if curl -sf localhost:8080/healthz; then echo; exit 0; fi
+            sleep 1
+          done
+          echo "container never became healthy"; docker logs kb; exit 1
+
+      # The same end-to-end suite the quality job ran against source, now
+      # pointed at the artifact that would actually ship. Testing the source and
+      # publishing the image tests one thing and releases another.
+      # Standard library only, so the runner's own python is enough and the test
+      # shares nothing with the container it is testing.
+      - name: end to end against the image
+        run: python3 test_serve.py http://localhost:8080
+
+      # The latency gate. k6 exits 99 when a threshold is breached, so the
+      # budget in perf/latency.js is what blocks the release.
+      - name: k6 load test with a hard budget
+        run: |
+          docker run --rm -i --network host \
+            -e BASE=http://localhost:8080 -e TOKEN=devstudent \
+            grafana/k6:latest run - < perf/latency.js
+
+      - name: container logs
+        if: always()
+        run: docker logs kb || true
+
+      # Only after every gate above has passed, and only from main. A pull
+      # request gets the full verdict and publishes nothing.
+      - name: publish
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:latest"
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"

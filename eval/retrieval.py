@@ -211,13 +211,89 @@ def report(results):
     return 1 if leaked else 0
 
 
+BASELINE = os.path.join(HERE, "baseline.json")
+
+
+def gate(results):
+    """Fail the build if a case that used to pass no longer does.
+
+    Not a percentage. A percentage hides a swap: fix one case, break another,
+    and the score is unchanged while the system has quietly changed who it
+    fails. It also moves whenever a question is added, so it cannot tell a
+    regression from a bigger denominator.
+
+    Per-case comparison has neither problem, and it is only honest because this
+    scorer is deterministic -- cached vectors, no model, no sampling -- so a
+    case that changes verdict changed for a reason. A gate this strict on a
+    stochastic scorer would fire on noise and be switched off inside a week,
+    which is the usual way a quality gate dies.
+    """
+    now = {r["id"] for r in results if r["ok"]}
+    leaked = [r for r in results if r["leaks"]]
+
+    if not os.path.exists(BASELINE):
+        raise SystemExit(f"no baseline at {BASELINE}; write one with --accept")
+
+    with open(BASELINE, encoding="utf-8") as f:
+        base = json.load(f)
+    was = set(base["passing"])
+
+    broke = sorted(was - now)
+    fixed = sorted(now - was)
+    added = sorted({r["id"] for r in results} - set(base["all_ids"]))
+
+    print(f"GATE  baseline {len(was)}/{len(base['all_ids'])} passing, "
+          f"recorded {base['recorded']}")
+    if fixed:
+        print(f"  improved: {', '.join(fixed)}")
+    if added:
+        print(f"  new cases, not gated until accepted: {', '.join(added)}")
+    for r in leaked:
+        print(f"  LEAK  {r['id']} {r['role']} saw {r['leaks']}")
+    for cid in broke:
+        r = next(x for x in results if x["id"] == cid)
+        print(f"  REGRESSED  {cid} {r['role']:<6} {r['q'][:50]!r}\n"
+              f"             {r['detail'] or r['got']}")
+
+    if broke or leaked:
+        print(f"\nFAILED: {len(broke)} regression(s), {len(leaked)} leak(s).\n"
+              f"Fix them, or accept the new behaviour deliberately with --accept.")
+        return 1
+    print("\nPASSED: nothing that worked is broken."
+          + (f" {len(fixed)} case(s) improved." if fixed else ""))
+    return 0
+
+
+def accept(results):
+    """Record current behaviour as the bar to hold.
+
+    Deliberately a separate command. A gate that updates its own baseline when
+    it fails measures nothing at all, so lowering the bar has to be a commit
+    somebody can see in a diff.
+    """
+    import datetime
+    body = {"recorded": datetime.date.today().isoformat(),
+            "passing": sorted(r["id"] for r in results if r["ok"]),
+            "all_ids": sorted(r["id"] for r in results)}
+    with open(BASELINE, "w", encoding="utf-8") as f:
+        json.dump(body, f, indent=1)
+    print(f"baseline written: {len(body['passing'])}/{len(body['all_ids'])} passing")
+    return 0
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--gate", action="store_true", help="exit 1 on a regression; for CI")
+    ap.add_argument("--accept", action="store_true", help="record current results as the baseline")
     args = ap.parse_args()
 
     results = score(load_golden())
     if args.json:
         json.dump(results, sys.stdout, indent=1)
         raise SystemExit(1 if any(r["leaks"] for r in results) else 0)
+    if args.accept:
+        raise SystemExit(accept(results))
+    if args.gate:
+        raise SystemExit(gate(results))
     raise SystemExit(report(results))

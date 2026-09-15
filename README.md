@@ -44,6 +44,53 @@ Retrieval on its own, no key required:
 .\.venv\Scripts\python.exe rag.py admin "adjunct pay per credit hour"
 ```
 
+Over HTTP. `KB_TOKENS` is mandatory, because a server that cannot identify a
+caller would have to refuse every request; ADR-13 covers why the role is never
+read from a header the caller writes:
+
+```powershell
+$env:KB_TOKENS="devstudent:student,devstaff:staff,devadmin:admin"
+.\.venv\Scripts\python.exe serve.py
+```
+
+```bash
+curl -H "Authorization: Bearer devstudent" "localhost:8080/search?q=how+late+can+I+enroll"
+```
+
+| Route | Auth | Needs a model |
+|---|---|---|
+| `GET /healthz` | no | no |
+| `GET /search?q=` | bearer token | no |
+| `POST /ask` | bearer token | yes, else `503` |
+
+## The pipeline
+
+`.github/workflows/ci.yml` runs on every push and can refuse to publish. Three
+things make it a gate rather than a report:
+
+| Gate | Fails the build when |
+|---|---|
+| `eval/retrieval.py --gate` | a golden case that used to pass stops passing, or anything leaks |
+| `perf/latency.js` (k6) | p95 on `/search` leaves its budget, or the error rate exceeds 1% |
+| Trivy | a critical CVE with an available fix is in the image |
+
+The quality gate compares **cases, not percentages**, because a percentage
+cannot see a swap: one case fixed, one broken, score unchanged (ADR-14). It was
+verified by breaking it on purpose — raising the retrieval floor from 0.61 to
+0.68 made it exit 1, name fifteen regressed cases, and report four improvements
+that a percentage would have netted off.
+
+Everything on that path runs without an API key, which is what makes it
+affordable per push: the free tier allows 20 model requests per day **per
+model**, so a live evaluation in CI would be exhausted before lunch. The live
+run is `.github/workflows/eval.yml`, started by hand.
+
+```powershell
+.\.venv\Scripts\python.exe eval\retrieval.py --gate     # what CI runs
+.\.venv\Scripts\python.exe eval\retrieval.py --accept   # deliberately move the bar
+.\.venv\Scripts\python.exe test_serve.py                # end to end over HTTP
+```
+
 ## How it fits together
 
 | File | What it owns |
@@ -149,3 +196,6 @@ first five live questions.
 | `KB_ROLE` | `student` | MCP server only |
 | `KB_DOCS` | `docs` | Corpus directory |
 | `KB_TICKETS` | `tickets.jsonl` | Ticket log |
+| `KB_TOKENS` | | **Required by `serve.py`.** `token:role` pairs, comma separated |
+| `PORT` | `8080` | `serve.py` |
+| `KB_PACE` | `25` | Seconds between live evaluation questions, to stay under the rate limit |
