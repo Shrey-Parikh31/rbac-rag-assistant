@@ -19,6 +19,23 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Patch the base image before installing anything.
+#
+# Not decoration. The first real run of the CVE gate refused this image over
+# three criticals in perl-base -- a regular expression heap overflow and a path
+# traversal in Archive::Tar -- all with a patched version already published.
+# `python:3.12-slim` carries perl as a base dependency and is rebuilt on its own
+# schedule, so an image built today can ship a fix that has existed for weeks.
+#
+# A blanket upgrade rather than a named package, because next month it is a
+# different package and a list of names is a list somebody has to maintain
+# against an adversary who is not consulting it. The cost is that two builds of
+# the same commit can differ, which is the correct trade for a base layer: the
+# alternative is a reproducible build of a known-vulnerable image.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependencies before source, so editing a .py file does not reinstall numpy.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
