@@ -32,13 +32,19 @@ export const options = {
     },
   },
   thresholds: {
-    // Measured at 24ms p95 on a developer laptop at this concurrency. The
-    // budget is an order of magnitude above that, which is deliberate: a CI
-    // runner is a noisy shared machine, and a budget tuned to a quiet laptop
-    // fails on Tuesdays and teaches everyone to re-run the job. This catches
-    // the regressions worth catching -- an accidental index rebuild per
-    // request, a synchronous embed on the hot path -- and not the weather.
-    'http_req_duration{expected_response:true}': ['p(95)<250'],
+    // 30ms, and the number is chosen by a failure that already happened.
+    //
+    // Measured on a CI runner: p95 9.01ms, median 3.71ms, over 68,000 requests
+    // at 2,287/s. A budget of 250ms would sit twenty-seven times above that and
+    // catch essentially nothing.
+    //
+    // The first run of this test measured p95 40.94ms with a median of 40.91 --
+    // no spread at all, because every request was paying the 40ms Linux
+    // delayed-ACK timer while Nagle held the response body. So the budget goes
+    // *below* 40ms deliberately: if that bug is ever reintroduced, this fails
+    // rather than quietly absorbing it. Three times the measured p95 is the
+    // headroom for a noisy shared runner.
+    'http_req_duration{expected_response:true}': ['p(95)<30'],
     // A fast error is still an error, and p95 alone cannot see it.
     'http_req_failed': ['rate<0.01'],
     'checks': ['rate>0.99'],

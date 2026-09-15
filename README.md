@@ -71,8 +71,34 @@ things make it a gate rather than a report:
 | Gate | Fails the build when |
 |---|---|
 | `eval/retrieval.py --gate` | a golden case that used to pass stops passing, or anything leaks |
-| `perf/latency.js` (k6) | p95 on `/search` leaves its budget, or the error rate exceeds 1% |
+| `perf/latency.js` (k6) | p95 on `/search` exceeds 30ms, or the error rate exceeds 1% |
 | Trivy | a critical CVE with an available fix is in the image |
+
+**Both scanners caught something real on their first run.** Trivy refused to
+publish over three criticals in `perl-base` — a heap overflow compiling regular
+expressions, a path traversal in `Archive::Tar` — all with a patched version
+already released, inherited from a `python:3.12-slim` base rebuilt on somebody
+else's schedule. semgrep found SHA1 in the embedding cache key, which was
+changed to SHA256 rather than suppressed (ADR-17).
+
+**And the load test found a bug nothing else could see.** The first k6 run
+reported p95 40.94ms, p90 40.93ms, median 40.91ms, min 1.75ms. A distribution
+with no spread is not a workload, it is a constant, and ~40ms is the Linux
+delayed-ACK timer: `http.server` flushes headers in one write and the body in
+another, so Nagle held the second segment waiting for an acknowledgement the
+client would not send for 40ms because it was waiting for more data. Retrieval
+itself takes under 2ms, so nearly all of the measured latency was two TCP timers
+arguing with each other.
+
+| | before | after `TCP_NODELAY` |
+|---|---|---|
+| p95 | 40.94 ms | **9.01 ms** |
+| median | 40.91 ms | **3.71 ms** |
+| throughput | 242 req/s | **2,287 req/s** |
+
+The budget is set at 30ms rather than a round 250ms for that reason: it sits
+*below* the delayed-ACK constant, so reintroducing that bug fails the build
+instead of being absorbed by generous headroom.
 
 The quality gate compares **cases, not percentages**, because a percentage
 cannot see a swap: one case fixed, one broken, score unchanged (ADR-14). It was

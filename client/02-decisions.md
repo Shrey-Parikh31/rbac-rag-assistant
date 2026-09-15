@@ -581,3 +581,47 @@ pass, which is the honest price of not carrying a rejected configuration forever
 A future finding gets the same treatment: fix it, or write down here why the rule
 is wrong. A suppression with no argument attached is how a scanner stops being
 read.
+
+---
+
+## ADR-18: The latency budget is set by a failure that already happened
+
+**Status:** accepted
+
+**Context.** A load test needs a number to fail at. The number was first written
+as `p(95) < 250ms`, chosen before anything had been measured, on the reasoning
+that a CI runner is noisy and a tight budget would fail on Tuesdays.
+
+Measured p95 on a runner is **9.01ms**, median 3.71ms, over 68,000 requests at
+2,287 per second. A 250ms budget sits twenty-seven times above the real number
+and would pass through almost any regression imaginable.
+
+**The first run measured something else entirely:** p95 40.94ms, p90 40.93ms,
+median 40.91ms, min 1.75ms. A distribution with no spread is not a workload, it
+is a constant. ~40ms is the Linux delayed-ACK timer. `http.server` flushes the
+response headers in one write and the body in another, so Nagle's algorithm held
+the second segment waiting for an acknowledgement that the client would not send
+for 40ms because it was itself waiting for more data. One line -- setting
+`disable_nagle_algorithm` -- moved p95 from 40.94ms to 9.01ms and throughput from
+242 to 2,287 requests per second.
+
+**Decision.** `p(95) < 30ms`, chosen so it sits *below* the delayed-ACK constant.
+
+**Reasoning.** A budget's job is to fail on the regressions that actually happen.
+The one that actually happened here costs 40ms, so a budget above 40ms would have
+absorbed it silently -- which is precisely what the original 250ms did on the
+first run, while the test reported green thresholds beside a number that was
+almost entirely TCP timers. 30ms is roughly three times the measured p95, which
+is headroom enough for a shared runner, and it is on the correct side of the one
+failure mode this system has demonstrated.
+
+**Consequences.** This budget will need revisiting when `/ask` is load tested,
+because that path spends most of its time inside a model provider and cannot be
+held to a number the provider controls. `/search` is the part this repository is
+responsible for, and it is the part being gated.
+
+**Worth stating plainly:** the load test earned its place on its first run, and
+not by measuring capacity. It found a latency bug that no unit test, no
+end-to-end test and no amount of reading the code would have surfaced, because
+the bug was not in the code -- it was in the conversation between two timers, and
+only load makes that visible.
