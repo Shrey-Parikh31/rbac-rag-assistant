@@ -117,7 +117,7 @@ def load(docs_dir=None):
 # --- embeddings ---------------------------------------------------------------
 
 def _key(text, task):
-    return hashlib.sha1(
+    return hashlib.sha256(
         f"{EMBED_MODEL}|{EMBED_DIM}|{task}|{text}".encode("utf-8")).hexdigest()
 
 

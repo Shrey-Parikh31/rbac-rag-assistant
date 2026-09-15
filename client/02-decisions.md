@@ -543,3 +543,41 @@ the log and does not. `--ignore-unfixed` on the blocking scan.
 a release, which is the uncomfortable half of this decision and is stated here
 rather than hidden in a flag. The alternative is blocking every release until
 somebody else ships a fix, which does not make the vulnerability smaller.
+
+---
+
+## ADR-17: Fix what the scanner finds, or argue with it in public
+
+**Status:** accepted
+
+**Context.** The first semgrep run produced exactly one blocking finding: SHA1 in
+`rag._key`, which builds the cache key for an embedding.
+
+The rule is about signatures, and this is a content-addressed cache key with no
+adversary anywhere near it. By the letter of the rule it is a false positive, and
+the standard response is `# nosemgrep` with a justification.
+
+**Decision.** Change it to SHA256 instead.
+
+**Reasoning.** The suppression is not free. It is a permanent line in the source
+saying "this rule does not apply here", and the next person who trips the same
+rule copies it rather than thinking. SHA256 costs one word and removes the
+argument, and a collision in a cache key is not a security problem but it is
+still a wrong answer returned silently.
+
+**The interesting part was migrating the cache.** Changing the hash orphans every
+cached vector, and re-embedding the corpus costs API calls and risks moving the
+retrieval numbers for a reason that has nothing to do with retrieval. Instead the
+known texts -- the corpus chunks, every golden question, the load test questions
+-- were re-hashed and their existing vectors carried across under the new key. No
+API calls, byte-identical vectors, and the scores confirm it: 94.5% tune, 93.3%
+test, 94.1% overall, unchanged to the decimal.
+
+**Consequences.** 212 orphaned entries were dropped, mostly 3072-dimension
+vectors left over from the dimensionality comparison in ADR-3. `vectors.json`
+fell from 2.5 MB to 845 KB. Re-running that comparison now costs an embedding
+pass, which is the honest price of not carrying a rejected configuration forever.
+
+A future finding gets the same treatment: fix it, or write down here why the rule
+is wrong. A suppression with no argument attached is how a scanner stops being
+read.
