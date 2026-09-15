@@ -24,7 +24,9 @@ env:
   # exist inside a container this workflow starts and kills. A real deployment
   # takes them from a secret store, which is what client/03-deployment.md says.
   KB_TOKENS: "devstudent:student,devstaff:staff,devadmin:admin"
-  IMAGE: ghcr.io/${{ github.repository }}
+  # Spelled out rather than ${{ github.repository }}, which carries the owner's
+  # capitalisation, and a docker tag must be lowercase.
+  IMAGE: ghcr.io/shrey-parikh31/rbac-rag-assistant
 
 jobs:
   # --------------------------------------------------------------- unit + gate
@@ -129,11 +131,13 @@ jobs:
 
       # The latency gate. k6 exits 99 when a threshold is breached, so the
       # budget in perf/latency.js is what blocks the release.
+      # Mounted, not piped in on stdin: the script reads questions.json beside
+      # itself, and a script arriving on stdin has no beside-itself to read.
       - name: k6 load test with a hard budget
         run: |
-          docker run --rm -i --network host \
+          docker run --rm --network host -v "$PWD/perf:/perf:ro" \
             -e BASE=http://localhost:8080 -e TOKEN=devstudent \
-            grafana/k6:latest run - < perf/latency.js
+            grafana/k6:latest run /perf/latency.js
 
       - name: container logs
         if: always()
