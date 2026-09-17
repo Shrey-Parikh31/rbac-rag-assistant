@@ -168,11 +168,20 @@ jobs:
           kubectl rollout status deploy/kb --timeout=120s
           kubectl get pods -o wide
 
+      # `kubectl port-forward svc/kb` reads like it goes through the Service and
+      # does not: it picks one pod and tunnels straight to it. That makes it
+      # fine for driving the test suite from the runner and useless for asking
+      # "is the service up", which is the question the rollback step needs --
+      # and it answered that question wrongly by surviving a pod deletion once
+      # and dying the next time. Anything about the Service is asked from inside
+      # the cluster instead, where the Service name actually resolves and
+      # actually load balances.
       - name: smoke test through the service
         run: |
           kubectl port-forward svc/kb 8080:80 > /dev/null 2>&1 &
           for i in $(seq 1 30); do curl -sf localhost:8080/healthz >/dev/null && break; sleep 1; done
           python3 test_serve.py http://localhost:8080
+          kill %1
 
       # Deliberately kill a pod. Kubernetes is supposed to notice and replace
       # it; asserting that it does is the difference between believing the
@@ -186,7 +195,7 @@ jobs:
           kubectl wait --for=condition=ready pod -l app=kb --timeout=90s
           ready=$(kubectl get deploy kb -o jsonpath='{.status.readyReplicas}')
           test "$ready" = "2" || { echo "expected 2 ready replicas, got '$ready'"; exit 1; }
-          curl -sf localhost:8080/healthz && echo "  still serving"
+          bash deploy/probe.sh && echo "  still serving through the Service"
 
       # The rollback. A deployment that cannot possibly start is pushed, and
       # three things have to be true: the rollout is refused, the service keeps
@@ -204,13 +213,18 @@ jobs:
           fi
           echo "rollout refused, as it should be"
 
-          # maxUnavailable is 0, so the old pods were never taken away.
-          curl -sf localhost:8080/healthz || { echo "FAIL: service went down during a failed deploy"; exit 1; }
+          # maxUnavailable is 0, so the old pods were never taken away. Asked
+          # from inside the cluster, because this is a question about the
+          # Service and a port-forward cannot answer it.
+          bash deploy/probe.sh || { echo "FAIL: service went down during a failed deploy"; exit 1; }
           echo "service stayed up throughout the failed deploy"
 
           kubectl rollout undo deploy/kb
           kubectl rollout status deploy/kb --timeout=90s
+          kubectl port-forward svc/kb 8080:80 > /dev/null 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8080/healthz >/dev/null && break; sleep 1; done
           python3 test_serve.py http://localhost:8080
+          kill %1
           echo "rolled back and serving correctly"
 
       - name: what the cluster saw
