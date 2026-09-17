@@ -21,8 +21,16 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-TOKENS = {"student": "devstudent", "staff": "devstaff", "admin": "devadmin"}
-KB_TOKENS = ",".join(f"{t}:{r}" for r, t in TOKENS.items())
+# The same `token:role` map the server reads, so a test run and the server it
+# talks to cannot disagree about who is who. Taken from the environment when
+# present: the deployed service does not use these tokens, because this
+# repository is public and a token anybody can read is not a clearance.
+KB_TOKENS = os.environ.get("KB_TOKENS") or \
+    "devstudent:student,devstaff:staff,devadmin:admin"
+TOKENS = {role: token for token, _, role in
+          (pair.strip().partition(":") for pair in KB_TOKENS.split(","))}
+assert set(TOKENS) >= {"student", "staff"}, \
+    f"KB_TOKENS must cover at least student and staff, got {sorted(TOKENS)}"
 # Only in the staff document, and in no tool description. eval/retrieval.py
 # explains at length why that distinction matters.
 STAFF_ONLY = "five business days"
@@ -73,7 +81,7 @@ def run(base):
     # A caller cannot promote themselves. This is the whole point of reading the
     # role from the token: the request may say whatever it likes.
     req = urllib.request.Request(base + "/search?q=what+do+adjuncts+earn")
-    req.add_header("Authorization", "Bearer devstudent")
+    req.add_header("Authorization", f"Bearer {TOKENS['student']}")
     req.add_header("X-Role", "admin")
     with urllib.request.urlopen(req, timeout=30) as r:
         assert json.loads(r.read())["role"] == "student", "a header changed the role"

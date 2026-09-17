@@ -625,3 +625,55 @@ not by measuring capacity. It found a latency bug that no unit test, no
 end-to-end test and no amount of reading the code would have surfaced, because
 the bug was not in the code -- it was in the conversation between two timers, and
 only load makes that visible.
+
+---
+
+## ADR-19: A throwaway cluster in CI, and a serverless deployment beside it
+
+**Status:** accepted
+
+**Context.** The roadmap asks for "deploy to a cloud cluster, smoke test, and
+rollback on failure". A managed Kubernetes control plane costs roughly $73 a
+month from every major provider, charged whether anyone visits or not. For a
+service with no traffic that is renting a shipping yard to hold one parcel.
+
+The two things a cluster would demonstrate are separable:
+
+1. **Does the orchestration work** -- rolling updates, self-healing, refusing a
+   deployment that cannot start.
+2. **Can a person open it** -- a URL on a CV.
+
+**Decision.** Both, and neither costs anything.
+
+`kind` builds a genuine Kubernetes cluster inside the CI runner, uses it for two
+minutes and deletes it. Cloud Run serves the public URL and sleeps at zero
+between visitors, inside a permanent free allowance of two million requests a
+month.
+
+**Consequences.** The cluster is a simulator: nothing outside the runner can
+reach it. What it does prove is the half that is hard, and it gives Layer 2
+somewhere to run chaos experiments -- "kill pods mid-request" is not a sentence
+that means anything on Cloud Run, because there are no pods.
+
+**The deployment is stronger than the rollback that was asked for.** A new
+revision goes out carrying no traffic at all, on its own tagged URL. The
+end-to-end suite runs against it there, on the internet, with the real secrets.
+Only then does traffic move. A rollback means production already served the
+broken version to somebody; this way it never did, and a failed candidate is
+discarded rather than reverted.
+
+Rollback is still proven, in the kind cluster, where an unstartable image is
+deployed on purpose and the pipeline asserts three things: the rollout is
+refused, the service keeps answering from the old pods throughout, and undo
+restores it. The assertion inverts the exit code of `kubectl rollout status`,
+because a rollback test that never observes a failed rollout proves nothing --
+the same vacuous shape as an access test that passed because nothing could be
+retrieved.
+
+**One thing this forced into the open.** The development tokens are written in
+`ci.yml`, which is fine while they only exist inside a container CI destroys.
+On a public URL they would be a published admin credential to a repository
+anyone can read, and the confidential document is one request away. The deployed
+service therefore takes randomly generated tokens from Secret Manager, and
+`test_serve.py` reads its token map from the environment rather than hardcoding
+it. Making something reachable changed what the same string means.

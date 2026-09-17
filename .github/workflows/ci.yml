@@ -230,3 +230,82 @@ jobs:
           docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:latest"
           docker push "$IMAGE:${{ github.sha }}"
           docker push "$IMAGE:latest"
+
+  # ------------------------------------------------------------------- deploy
+  # Cloud Run, which runs the container only while somebody is asking it
+  # something and costs nothing the rest of the time. The kind cluster above
+  # proves the orchestration; this is the part with a URL a person can open.
+  #
+  # Skipped entirely until GCP_PROJECT_ID is set as a repository variable, so
+  # the pipeline is green for anyone who clones this without a cloud account.
+  # deploy/GOOGLE_CLOUD_SETUP.md is the one-time setup.
+  deploy:
+    runs-on: ubuntu-latest
+    needs: image
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.GCP_PROJECT_ID != ''
+    permissions:
+      contents: read
+      id-token: write   # the OIDC token that stands in for a stored credential
+    steps:
+      - uses: actions/checkout@v4
+
+      # No service account key anywhere. GitHub mints a short-lived token that
+      # says "this run, from this repository", Google is configured to trust
+      # exactly that statement, and nothing long-lived is ever stored. A JSON
+      # key in a repository secret is a password with no expiry date that
+      # everyone forgets about until it appears in a log.
+      - uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      # Deployed with no traffic at all. The new revision exists, is reachable
+      # on its own tagged URL, and is serving nobody.
+      #
+      # This is better than deploy-then-roll-back, which is what the roadmap
+      # asks for: a rollback means production already served the bad version to
+      # somebody. Here a broken revision is never in front of a user, so there
+      # is nothing to roll back from.
+      - name: deploy a candidate revision, no traffic
+        run: |
+          gcloud run deploy kb \
+            --image "$IMAGE:${{ github.sha }}" \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --no-traffic --tag candidate \
+            --min-instances 0 --max-instances 3 \
+            --memory 512Mi --cpu 1 \
+            --set-secrets "KB_TOKENS=kb-tokens:latest" \
+            --quiet
+
+      # The same end-to-end suite, now against a real revision on the internet.
+      # KB_TOKENS comes from a GitHub secret because the deployed tokens are not
+      # the development ones: this repository is public, and a token anyone can
+      # read is not a clearance.
+      - name: smoke test the candidate
+        env:
+          KB_TOKENS: ${{ secrets.KB_TOKENS_DEPLOYED }}
+        run: |
+          url=$(gcloud run services describe kb --region us-central1 \
+                  --format='value(status.traffic.filter(tag:candidate).extract(url))' | tr -d '[]')
+          echo "candidate: $url"
+          python3 test_serve.py "$url"
+
+      # Only now does anybody see it.
+      - name: promote
+        run: |
+          gcloud run services update-traffic kb --region us-central1 --to-latest --quiet
+          gcloud run services describe kb --region us-central1 --format='value(status.url)'
+
+      # The candidate failed its smoke test, so traffic was never moved. Clean
+      # up the tag so the next run starts from a known state; production is
+      # still serving the previous revision and never knew.
+      - name: discard a candidate that failed
+        if: failure()
+        run: |
+          gcloud run services update-traffic kb --region us-central1 \
+            --remove-tags candidate --quiet || true
+          echo "candidate discarded; live traffic never moved"
