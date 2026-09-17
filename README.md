@@ -100,6 +100,41 @@ The budget is set at 30ms rather than a round 250ms for that reason: it sits
 *below* the delayed-ACK constant, so reintroducing that bug fails the build
 instead of being absorbed by generous headroom.
 
+## Where it runs
+
+A managed Kubernetes control plane costs about $73/month whether anyone visits
+or not. Both halves of what a cluster would prove are available for nothing, so
+the pipeline does both (ADR-19).
+
+**A real cluster, for two minutes.** `kind` builds one inside the CI runner,
+deploys `deploy/k8s.yaml` to it, and asserts three things by watching them
+happen:
+
+```
+deleting pod/kb-5cd8dc8b86-xzjpx  →  back to 2/2 ready, service healthy
+error: deployment "kb" exceeded its progress deadline
+rollout refused, as it should be  →  service stayed up throughout
+deployment.apps/kb rolled back    →  serve: ok
+```
+
+The rollback step inverts the exit code of `kubectl rollout status` on purpose:
+a rollback test that never observes a *failed* rollout proves nothing. It also
+gives Layer 2 somewhere to run chaos experiments — "kill pods mid-request" is
+not a sentence that means anything on a serverless host.
+
+**A URL, on Cloud Run.** The container runs only while somebody is asking it
+something and sleeps at zero otherwise, inside a permanent free allowance of two
+million requests a month. A new revision deploys carrying **no traffic**, the
+end-to-end suite runs against it on its own tagged URL, and only then does
+traffic move — so a broken revision is never in front of a user and there is
+nothing to roll back from. Setup is `deploy/GOOGLE_CLOUD_SETUP.md`; the job is
+skipped entirely until `GCP_PROJECT_ID` exists, so this repository stays green
+for anyone who clones it without a cloud account.
+
+Authentication is Workload Identity Federation — GitHub signs a statement naming
+the repository and the run, Google is configured to accept exactly that, and no
+long-lived key is stored anywhere.
+
 The quality gate compares **cases, not percentages**, because a percentage
 cannot see a swap: one case fixed, one broken, score unchanged (ADR-14). It was
 verified by breaking it on purpose — raising the retrieval floor from 0.61 to

@@ -343,3 +343,27 @@ immediately instead of waiting thirty seconds to say nothing useful.
 Same family as the other fifteen. A test that connects to something other than
 the thing it started passes for a reason unrelated to the code under test, and
 the passing looks exactly like the real thing.
+
+### Instrument bug seventeen
+
+The cluster stage reported `FAIL: service went down during a failed deploy`. The
+service had not gone down. The rollout was correctly refused and the pods were
+serving; the check was wrong.
+
+`kubectl port-forward svc/kb` reads as though it goes through the Service and
+does not — it selects a single pod and tunnels straight to it. So it reported
+one pod's health while appearing to report the Service's, and it happened to
+survive a pod deletion on one run and die on the next.
+
+Service-level questions are now asked from inside the cluster, where the Service
+name resolves through real cluster DNS across real endpoints.
+
+Seventeen now, and the shape has not changed since the first one: **a
+measurement that looks like it is watching the thing it names.** An access test
+that passed because nothing could be retrieved. A judge that could not see the
+question. A metric at 100% on a set with no case that could fail it. A test that
+connected to a stale server from an earlier session. A tunnel to one pod
+answering a question about a Service.
+
+Every one of them passed while being wrong, which is the only reason the list is
+this long — a measurement that fails loudly gets fixed the same afternoon.
