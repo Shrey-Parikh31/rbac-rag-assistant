@@ -268,6 +268,15 @@ jobs:
             [ -n "$done_" ] && break; sleep 1
           done
           kubectl logs job/chaos-load | grep -E "http_req_failed|http_reqs|checks_succeeded|checks_failed|✗|✓|ERRO|WARN" | head -20
+          # Who actually did the work. Every pod counts its own requests, so
+          # an idle replacement beside an overloaded survivor is visible here
+          # and nowhere else -- the Service-level totals look fine either way.
+          echo "searches served per pod:"
+          for p in $(kubectl get pods -l app=kb --field-selector=status.phase=Running -o name); do
+            n=$(kubectl exec "$p" -- python -c "import urllib.request; print(next((l.split()[-1] for l in urllib.request.urlopen('http://127.0.0.1:8080/metrics').read().decode().splitlines() if l.startswith('kb_requests_total{route=\"/search\",code=\"200\"}')), 0))")
+            age=$(kubectl get "$p" -o jsonpath='{.metadata.creationTimestamp}')
+            echo "  $p  created $age  served $n"
+          done
           test "$(kubectl get job chaos-load -o jsonpath='{.status.succeeded}')" = "1" \
             || { echo "FAIL: requests failed while a pod was being replaced"; exit 1; }
           echo "no request failed while a pod was killed and replaced"
