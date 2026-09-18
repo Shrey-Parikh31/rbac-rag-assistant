@@ -256,8 +256,13 @@ jobs:
           kubectl wait --for=condition=ready pod -l app=chaos-load --timeout=60s
           sleep 15
           victim=$(kubectl get pods -l app=kb -o name | head -1)
-          echo "killing $victim at $(date +%T), 15s into 40s of steady load"
+          echo "killing $victim at $(date +%T), 15s into 75s of steady load"
+          t0=$(date +%s)
           kubectl delete "$victim" --wait=false
+          # How long the pod takes to actually die is half of the result. ~30s
+          # means SIGTERM was ignored and SIGKILL did the work.
+          kubectl wait --for=delete "$victim" --timeout=90s
+          echo "victim took $(( $(date +%s) - t0 ))s to terminate"
           for i in $(seq 1 120); do
             done_=$(kubectl get job chaos-load -o jsonpath='{.status.succeeded}{.status.failed}')
             [ -n "$done_" ] && break; sleep 1

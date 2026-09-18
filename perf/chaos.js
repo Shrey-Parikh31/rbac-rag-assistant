@@ -17,7 +17,12 @@ const QUESTIONS = JSON.parse(open('./questions.json'));
 
 export const options = {
   scenarios: {
-    steady: { executor: 'constant-vus', vus: 10, duration: '40s' },
+    // 75s, not 40. The first run lasted 40s with the kill at 15s and passed
+    // cleanly -- because Python as PID 1 ignored SIGTERM, Kubernetes waited
+    // its 30s grace period before SIGKILL, and 15 + 30 is after 40. The
+    // experiment ended before the failure it existed to observe. The window
+    // now has to outlast the grace period, or it measures nothing.
+    steady: { executor: 'constant-vus', vus: 10, duration: '75s' },
   },
   thresholds: {
     http_req_failed: ['rate==0'],
