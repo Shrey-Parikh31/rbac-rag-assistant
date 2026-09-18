@@ -69,11 +69,15 @@ groups:
       # The slow burn. Not worth waking anyone for; worth fixing this week.
       - alert: KbAvailabilityBurn
         expr: |
+          (
               sum(rate(kb_requests_total{route="/search",code=~"5.."}[3d]))
             / sum(rate(kb_requests_total{route="/search"}[3d])) > 0.005
+          )
           and
+          (
               sum(rate(kb_requests_total{route="/search",code=~"5.."}[6h]))
             / sum(rate(kb_requests_total{route="/search"}[6h])) > 0.005
+          )
         for: 1h
         labels:
           severity: ticket
@@ -112,11 +116,15 @@ groups:
 
       - alert: KbLatencyBurn
         expr: |
+          (
               1 - sum(rate(kb_request_duration_seconds_bucket{route="/search",le="0.05"}[3d]))
                 / sum(rate(kb_request_duration_seconds_count{route="/search"}[3d])) > 0.01
+          )
           and
+          (
               1 - sum(rate(kb_request_duration_seconds_bucket{route="/search",le="0.05"}[6h]))
                 / sum(rate(kb_request_duration_seconds_count{route="/search"}[6h])) > 0.01
+          )
         for: 1h
         labels:
           severity: ticket
@@ -137,10 +145,14 @@ groups:
       # traffic floor keeps three unlucky questions at 4am from filing a ticket.
       - alert: KbIndexLooksBroken
         expr: |
+          (
               sum(rate(kb_search_outcomes_total{outcome="no_match"}[15m]))
             / sum(rate(kb_search_outcomes_total[15m])) > 0.5
+          )
           and
+          (
             sum(rate(kb_search_outcomes_total[15m])) * 900 > 50
+          )
         for: 10m
         labels:
           severity: ticket
