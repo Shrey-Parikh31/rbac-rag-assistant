@@ -153,7 +153,36 @@ def run(base):
 
     check_load_test_questions(base)
     check_metrics(base)
+    check_connection_recycling(base)
     print("serve: ok")
+
+
+def check_connection_recycling(base):
+    """A keep-alive connection is asked to reconnect after 100 requests.
+
+    Without this a replacement pod receives nothing until clients happen to
+    reconnect: measured as 0 requests to the new pod against 48,838 to the
+    survivor in chaos experiment 1.
+    """
+    import http.client
+    url = urllib.parse.urlparse(base)
+    if url.hostname not in ("127.0.0.1", "localhost"):
+        # Behind a proxy (Cloud Run) the proxy owns the client's connection and
+        # our Connection: close is spent on the proxy, so the client cannot see
+        # it. Nothing to check from out here.
+        return
+    conn = http.client.HTTPConnection(url.netloc, timeout=10)
+    headers = {"Authorization": f"Bearer {TOKENS['student']}"}
+    closed_at = None
+    for i in range(1, 121):
+        conn.request("GET", "/search?q=how+late+can+I+enroll", headers=headers)
+        r = conn.getresponse()
+        r.read()
+        if r.getheader("Connection", "").lower() == "close":
+            closed_at = i
+            break
+    conn.close()
+    assert closed_at == 100, f"recycled after {closed_at} requests, expected 100"
 
 
 def _free_port():

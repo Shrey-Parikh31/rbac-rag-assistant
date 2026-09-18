@@ -34,6 +34,24 @@ import tools
 PORT = int(os.environ.get("PORT", "8080"))
 MAX_QUERY = 500  # a question, not a payload
 
+# Recycle every keep-alive connection after this many requests.
+#
+# Kubernetes balances connections, not requests: a Service picks a pod when a
+# connection opens and never again. Chaos experiment 1 showed what that costs.
+# When a pod drained, all ten clients reconnected at that moment, when only the
+# survivor was ready. The replacement came up a few seconds later and served
+# 0 requests for the rest of the run while the survivor served 48,838, pinned at
+# its CPU limit, and throughput fell from 1,970 to 802 requests a second. No
+# request failed, so neither an error rate nor an availability SLO would have
+# noticed.
+#
+# Asking clients to reconnect every hundred requests lets new pods pick up
+# traffic within about a second at that load, for one TCP handshake per hundred
+# requests. Counting requests rather than seconds makes it self-scaling: an
+# idle connection is never disturbed, and a busy one rebalances quickly, which
+# is exactly when rebalancing matters. nginx does the same, with 1000.
+MAX_REQUESTS_PER_CONNECTION = 100
+
 
 def load_tokens():
     """`token:role,token:role` from KB_TOKENS. Absent or malformed is fatal.
@@ -160,7 +178,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
-        if DRAINING.is_set():
+        # One handler object per connection, so this counts requests on it.
+        self._served = getattr(self, "_served", 0) + 1
+        if DRAINING.is_set() or self._served >= MAX_REQUESTS_PER_CONNECTION:
             # Go and reconnect; the new connection will be routed elsewhere.
             self.send_header("Connection", "close")
             self.close_connection = True
