@@ -77,10 +77,27 @@ jobs:
       - name: semgrep
         run: semgrep --config=p/python --config=p/secrets --error --metrics=off .
 
+  # -------------------------------------------------------------- alerting
+  # The alert rules are code, and like code they are tested: promtool runs each
+  # rule against synthetic traffic and checks it fires, stays quiet, and clears
+  # exactly when reliability/alerts.test.yaml says it should.
+  reliability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: alert rules are valid
+        run: |
+          docker run --rm -v "$PWD/reliability:/r" -w /r --entrypoint promtool \
+            prom/prometheus:v3.14.0 check rules alerts.yaml
+      - name: alert rules do what they claim
+        run: |
+          docker run --rm -v "$PWD/reliability:/r" -w /r --entrypoint promtool \
+            prom/prometheus:v3.14.0 test rules alerts.test.yaml
+
   # ---------------------------------------------------- build, scan, load, ship
   image:
     runs-on: ubuntu-latest
-    needs: [quality, static]
+    needs: [quality, static, reliability]
     permissions:
       contents: read
       packages: write
@@ -226,6 +243,29 @@ jobs:
           python3 test_serve.py http://localhost:8080
           kill %1
           echo "rolled back and serving correctly"
+
+      # Experiment 1 from Layer 2: kill a pod while people are using it.
+      # The self-healing step above proved a pod comes back. This asks the
+      # question a user cares about, which is different: did anybody's request
+      # fail while it was coming back?
+      - name: chaos, kill a pod under load
+        run: |
+          kind load docker-image --name ci grafana/k6:latest
+          kubectl create configmap perf --from-file=perf/
+          kubectl apply -f reliability/chaos-load.yaml
+          kubectl wait --for=condition=ready pod -l app=chaos-load --timeout=60s
+          sleep 15
+          victim=$(kubectl get pods -l app=kb -o name | head -1)
+          echo "killing $victim at $(date +%T), 15s into 40s of steady load"
+          kubectl delete "$victim" --wait=false
+          for i in $(seq 1 120); do
+            done_=$(kubectl get job chaos-load -o jsonpath='{.status.succeeded}{.status.failed}')
+            [ -n "$done_" ] && break; sleep 1
+          done
+          kubectl logs job/chaos-load | grep -E "http_req_failed|http_reqs|checks_succeeded|checks_failed|✗|✓|ERRO|WARN" | head -20
+          test "$(kubectl get job chaos-load -o jsonpath='{.status.succeeded}')" = "1" \
+            || { echo "FAIL: requests failed while a pod was being replaced"; exit 1; }
+          echo "no request failed while a pod was killed and replaced"
 
       - name: what the cluster saw
         if: always()

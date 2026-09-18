@@ -69,6 +69,43 @@ def check_load_test_questions(base):
         assert len(body["result"]) > 20, f"load test question {q!r} returns nothing"
 
 
+def check_metrics(base):
+    """The counters moved, and moved in the right places.
+
+    Exact counts are only checked against a local server. Behind a load
+    balancer with several instances, /metrics answers from whichever instance
+    received it, which may not be the one that served the requests above.
+    """
+    with urllib.request.urlopen(base + "/metrics", timeout=10) as r:
+        text = r.read().decode()
+    for name in ("kb_requests_total", "kb_request_duration_seconds", "kb_search_outcomes_total"):
+        assert f"# TYPE {name}" in text, f"{name} missing from /metrics"
+
+    # The request to /nope earlier must be counted as route="other". A label
+    # copied from the path would let anyone mint a time series per URL.
+    assert 'route="/nope"' not in text, "an arbitrary path became a metric label"
+
+    if not base.startswith(("http://127.0.0.1", "http://localhost")):
+        return
+    series = {}
+    for line in text.splitlines():
+        if line and not line.startswith("#"):
+            key, _, value = line.rpartition(" ")
+            series[key] = float(value)
+    ok = series.get('kb_requests_total{route="/search",code="200"}', 0)
+    assert ok >= 40, f"expected at least 40 successful searches counted, got {ok}"
+    assert series.get('kb_requests_total{route="/search",code="401"}', 0) >= 1, \
+        "the unauthenticated search was not counted"
+    assert series.get('kb_requests_total{route="other",code="404"}', 0) >= 1, \
+        "the unknown path was not counted under route=other"
+    # A histogram's +Inf bucket is its count, by definition. If they disagree the
+    # exposition is malformed and every percentile computed from it is fiction.
+    assert series['kb_request_duration_seconds_bucket{route="/search",le="+Inf"}'] == \
+        series['kb_request_duration_seconds_count{route="/search"}']
+    answered = series.get('kb_search_outcomes_total{outcome="answer"}', 0)
+    assert answered > 0, "no search was classified as answered"
+
+
 def run(base):
     status, body = call(base, "/healthz")
     assert status == 200 and body["ok"], body
@@ -115,6 +152,7 @@ def run(base):
                 assert STAFF_ONLY not in text.lower(), "staff material leaked under load"
 
     check_load_test_questions(base)
+    check_metrics(base)
     print("serve: ok")
 
 

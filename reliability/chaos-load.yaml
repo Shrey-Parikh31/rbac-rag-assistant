@@ -1,0 +1,26 @@
+# The load generator for chaos experiments, as a Job inside the cluster.
+# perf/chaos.js explains why it has to be inside rather than port-forwarded.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chaos-load
+spec:
+  backoffLimit: 0          # a failed run is the result, not something to retry
+  template:
+    metadata:
+      labels: { app: chaos-load }
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:latest
+          imagePullPolicy: IfNotPresent   # side-loaded by CI, never pulled
+          args: ["run", "/perf/chaos.js"]
+          env:
+            - { name: BASE, value: "http://kb" }
+            - { name: TOKEN, value: "devstudent" }
+          volumeMounts:
+            - { name: perf, mountPath: /perf }
+      volumes:
+        - name: perf
+          configMap: { name: perf }

@@ -1,0 +1,149 @@
+# Alerts on the error budget, not on thresholds.
+#
+# A static alert says "page when errors exceed 5%". It pages on a one-minute
+# blip that cost nothing, and it stays silent through a 3% error rate that
+# quietly spends a month's budget in two days. Both mistakes come from asking
+# "how bad is it right now" instead of "how fast are we spending what we can
+# afford to lose".
+#
+# Burn rate is that second question. A burn rate of 1 spends the budget exactly
+# over the SLO window; 14.4 spends 2% of a 30-day budget in one hour. The
+# multipliers and window pairs are the ones from the Google SRE Workbook,
+# chapter 5, unchanged: they are well studied and inventing new ones would need
+# a reason this project does not have.
+#
+# Each alert needs BOTH a long window and a short one to be over the line. The
+# long window stops a blip from paging. The short window makes the alert clear
+# within minutes of the problem stopping, instead of an hour later.
+#
+# reliability/alerts.test.yaml proves each of those claims with promtool rather
+# than asserting them here.
+#
+# ponytail: expressions inline rather than via recording rules. Recording rules
+# are a query-cost optimisation for a busy Prometheus; with one service they
+# would be twice the YAML to save nothing. Add them when evaluation time shows up.
+groups:
+  - name: kb-slo
+    rules:
+      # ------------------------------------------------------------ down
+      # Server-side error ratios cannot see a server that is not running: no
+      # process, no requests counted, no errors counted, ratio undefined, no
+      # alert. Total outage is the one failure the burn-rate alerts are
+      # structurally blind to, so it gets its own.
+      - alert: KbDown
+        expr: up{job="kb"} == 0
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: No instance of the assistant is answering scrapes.
+          runbook: reliability/runbooks/kb-down.md
+
+      # ---------------------------------------------------- availability
+      # SLO: 99.5% of /search requests do not fail with a 5xx. Budget: 0.5%.
+      # 14.4 x 0.005 = 0.072.  6 x 0.005 = 0.03.  1 x 0.005 = 0.005.
+      - alert: KbAvailabilityBurn
+        expr: |
+          (
+              sum(rate(kb_requests_total{route="/search",code=~"5.."}[1h]))
+            / sum(rate(kb_requests_total{route="/search"}[1h])) > 0.072
+          and
+              sum(rate(kb_requests_total{route="/search",code=~"5.."}[5m]))
+            / sum(rate(kb_requests_total{route="/search"}[5m])) > 0.072
+          )
+          or
+          (
+              sum(rate(kb_requests_total{route="/search",code=~"5.."}[6h]))
+            / sum(rate(kb_requests_total{route="/search"}[6h])) > 0.03
+          and
+              sum(rate(kb_requests_total{route="/search",code=~"5.."}[30m]))
+            / sum(rate(kb_requests_total{route="/search"}[30m])) > 0.03
+          )
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: Search is failing fast enough to exhaust the monthly error budget within days.
+          runbook: reliability/runbooks/availability-burn.md
+
+      # The slow burn. Not worth waking anyone for; worth fixing this week.
+      - alert: KbAvailabilityBurn
+        expr: |
+              sum(rate(kb_requests_total{route="/search",code=~"5.."}[3d]))
+            / sum(rate(kb_requests_total{route="/search"}[3d])) > 0.005
+          and
+              sum(rate(kb_requests_total{route="/search",code=~"5.."}[6h]))
+            / sum(rate(kb_requests_total{route="/search"}[6h])) > 0.005
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: Search errors are steadily spending the error budget faster than it refills.
+          runbook: reliability/runbooks/availability-burn.md
+
+      # --------------------------------------------------------- latency
+      # SLO: 99% of /search requests complete within 50ms. Budget: 1%.
+      # "Slow" is everything not in the le="0.05" bucket, read off an exact
+      # bucket boundary because the buckets were chosen to include it.
+      # 14.4 x 0.01 = 0.144.  6 x 0.01 = 0.06.  1 x 0.01 = 0.01.
+      - alert: KbLatencyBurn
+        expr: |
+          (
+              1 - sum(rate(kb_request_duration_seconds_bucket{route="/search",le="0.05"}[1h]))
+                / sum(rate(kb_request_duration_seconds_count{route="/search"}[1h])) > 0.144
+          and
+              1 - sum(rate(kb_request_duration_seconds_bucket{route="/search",le="0.05"}[5m]))
+                / sum(rate(kb_request_duration_seconds_count{route="/search"}[5m])) > 0.144
+          )
+          or
+          (
+              1 - sum(rate(kb_request_duration_seconds_bucket{route="/search",le="0.05"}[6h]))
+                / sum(rate(kb_request_duration_seconds_count{route="/search"}[6h])) > 0.06
+          and
+              1 - sum(rate(kb_request_duration_seconds_bucket{route="/search",le="0.05"}[30m]))
+                / sum(rate(kb_request_duration_seconds_count{route="/search"}[30m])) > 0.06
+          )
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: Search is slow for enough requests to exhaust the latency budget within days.
+          runbook: reliability/runbooks/latency-burn.md
+
+      - alert: KbLatencyBurn
+        expr: |
+              1 - sum(rate(kb_request_duration_seconds_bucket{route="/search",le="0.05"}[3d]))
+                / sum(rate(kb_request_duration_seconds_count{route="/search"}[3d])) > 0.01
+          and
+              1 - sum(rate(kb_request_duration_seconds_bucket{route="/search",le="0.05"}[6h]))
+                / sum(rate(kb_request_duration_seconds_count{route="/search"}[6h])) > 0.01
+        for: 1h
+        labels:
+          severity: ticket
+        annotations:
+          summary: Search latency is steadily spending its budget faster than it refills.
+          runbook: reliability/runbooks/latency-burn.md
+
+      # ----------------------------------------------------------- index
+      # Every request returning 200 while every answer is "no match". The
+      # availability SLO cannot see this -- nothing failed -- and it is the
+      # most likely shape of "the vector store is broken": the index loaded
+      # empty, or loaded vectors from a different embedding model, and now
+      # nothing clears the similarity floor.
+      #
+      # A threshold rather than a burn rate, because there is no ground truth
+      # to set an objective against. In the golden set about a fifth of
+      # questions correctly have no answer; half is far outside that, and the
+      # traffic floor keeps three unlucky questions at 4am from filing a ticket.
+      - alert: KbIndexLooksBroken
+        expr: |
+              sum(rate(kb_search_outcomes_total{outcome="no_match"}[15m]))
+            / sum(rate(kb_search_outcomes_total[15m])) > 0.5
+          and
+            sum(rate(kb_search_outcomes_total[15m])) * 900 > 50
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Most searches are finding nothing, while returning success.
+          runbook: reliability/runbooks/index-broken.md

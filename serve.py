@@ -23,6 +23,7 @@ is what will say when that stops being true, and gunicorn is the upgrade.
 import json
 import os
 import sys
+import threading
 import time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -60,6 +61,75 @@ def load_tokens():
 
 
 TOKENS = load_tokens()
+
+
+class Metrics:
+    """Counters and a latency histogram, in Prometheus text format, by hand.
+
+    The format is a few lines of plain text, so a client library would be a
+    dependency for string formatting. What it would have given for free is
+    thread safety, which is the one thing here that is easy to get wrong: a
+    ThreadingHTTPServer increments these from many threads at once, and `+= 1`
+    on a dict entry is a read and a write with room for another thread between
+    them. Hence the lock.
+
+    Every label value is from a fixed set. A route label taken straight from the
+    request path would let anyone create a new time series per URL they can type,
+    which is how a monitoring system gets taken down by a scanner.
+    """
+    # Chosen around the SLO threshold (50ms) and the k6 budget (30ms), so both
+    # can be read off exact bucket boundaries instead of interpolated.
+    BUCKETS = (0.005, 0.01, 0.025, 0.03, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5)
+    ROUTES = ("/healthz", "/search", "/ask", "/metrics")
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.requests = {}   # (route, code) -> count
+        self.latency = {}    # route -> [per-bucket cumulative counts..., +Inf, sum]
+        self.outcomes = {}   # search outcome -> count
+
+    def observe(self, path, code, seconds):
+        route = path if path in self.ROUTES else "other"
+        with self.lock:
+            key = (route, str(code))
+            self.requests[key] = self.requests.get(key, 0) + 1
+            h = self.latency.setdefault(route, [0] * (len(self.BUCKETS) + 2))
+            for i, le in enumerate(self.BUCKETS):
+                if seconds <= le:
+                    h[i] += 1
+            h[-2] += 1          # +Inf, which is also the count
+            h[-1] += seconds    # sum
+
+    def outcome(self, name):
+        with self.lock:
+            self.outcomes[name] = self.outcomes.get(name, 0) + 1
+
+    def render(self):
+        with self.lock:
+            out = ["# HELP kb_requests_total HTTP requests by route and status code.",
+                   "# TYPE kb_requests_total counter"]
+            for (route, code), n in sorted(self.requests.items()):
+                out.append(f'kb_requests_total{{route="{route}",code="{code}"}} {n}')
+            out += ["# HELP kb_request_duration_seconds Time to answer, by route.",
+                    "# TYPE kb_request_duration_seconds histogram"]
+            for route, h in sorted(self.latency.items()):
+                for le, n in zip(self.BUCKETS, h):
+                    out.append(f'kb_request_duration_seconds_bucket{{route="{route}",le="{le}"}} {n}')
+                out.append(f'kb_request_duration_seconds_bucket{{route="{route}",le="+Inf"}} {h[-2]}')
+                out.append(f'kb_request_duration_seconds_sum{{route="{route}"}} {h[-1]:.6f}')
+                out.append(f'kb_request_duration_seconds_count{{route="{route}"}} {h[-2]}')
+            # There is no ground truth online, so this cannot say whether an
+            # answer was right. What it can say is the mix, and a mix that
+            # suddenly goes all "no match" is an index that has stopped working
+            # while every request still returns 200.
+            out += ["# HELP kb_search_outcomes_total /search results by kind.",
+                    "# TYPE kb_search_outcomes_total counter"]
+            for name, n in sorted(self.outcomes.items()):
+                out.append(f'kb_search_outcomes_total{{outcome="{name}"}} {n}')
+            return "\n".join(out) + "\n"
+
+
+METRICS = Metrics()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -132,6 +202,14 @@ class Handler(BaseHTTPRequestHandler):
         and this is a system whose entire subject is material that must not
         reach the wrong reader.
         """
+        started = time.monotonic()
+        # Per-request state reset here, because under keep-alive one handler
+        # object serves every request on a connection. Left alone, a request
+        # that crashes before responding is recorded with the previous request's
+        # status code, and a POST that follows another POST computes how much
+        # body to drain from the last one's length.
+        self._status = None
+        self._read = 0
         try:
             handler()
         except Exception:
@@ -141,6 +219,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(500, {"error": "internal error; see server logs"})
             except Exception:
                 pass  # response already begun; nothing useful left to say
+        finally:
+            # Recorded in `finally`, so a request that crashed is counted as the
+            # 500 it was. Metrics that only see successes report a perfect
+            # availability right up until the moment somebody checks by hand.
+            METRICS.observe(urlparse(self.path).path, self._status or 500,
+                            time.monotonic() - started)
 
     def _get(self):
         url = urlparse(self.path)
@@ -150,6 +234,20 @@ class Handler(BaseHTTPRequestHandler):
             # says only that the process is up and the index is built.
             return self._send(200, {"ok": True, "chunks": len(index().chunks),
                                     "dim": rag.EMBED_DIM})
+
+        if url.path == "/metrics":
+            # Unauthenticated, like /healthz: counts and timings only, never a
+            # question, a token or a document. The outcome mix does reveal how
+            # often callers reach for restricted material, which is mildly
+            # sensitive, and is the reason to keep this port off the public
+            # internet in a real deployment rather than behind a password.
+            payload = METRICS.render().encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; version=0.0.4")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
 
         role = self._role()
         if role is None:
@@ -168,6 +266,9 @@ class Handler(BaseHTTPRequestHandler):
             # hole waiting to be found.
             tools.set_role(role)
             result = tools.search_docs(q)
+            METRICS.outcome("no_match" if result == tools.NO_MATCH else
+                            "restricted" if result.startswith(tools.RESTRICTED_PREFIX)
+                            else "answer")
             return self._send(200, {"role": role, "result": result,
                                     "took_s": round(time.monotonic() - started, 3)})
 
