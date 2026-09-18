@@ -379,10 +379,52 @@ def _drain_then_stop(server):
     server.shutdown()
 
 
+# One known question per document, asked at startup, as the role cleared to
+# read it. Chosen from the golden set as the passing case with the widest
+# margin over the similarity floor, so a canary failing means the index is
+# wrong rather than that a borderline question drifted.
+#
+# Experiment 2 is why. A missing or truncated vectors.json already stopped the
+# server from starting. But document vectors from the wrong model started fine,
+# reported healthy, and found nothing for anyone; and shuffled vectors -- every
+# document holding a neighbour's -- started fine, reported healthy, and handed
+# out the wrong document for half the probe questions. Nothing failed, so no
+# error metric saw it, and a confidently wrong answer is not even a "no match"
+# for KbIndexLooksBroken to count.
+CANARIES = [
+    ("How late can I enroll in a course?", "student", "enrollment.md"),
+    ("Can a grade appeal go above the dean?", "student", "grading.md"),
+    ("Remind me how fast a suspected compromise must be reported.", "staff", "incident-response.md"),
+    ("What are the faculty compensation bands?", "admin", "salary-bands.md"),
+]
+
+
+def check_canaries(idx):
+    """Refuse to serve an index that cannot find its own documents.
+
+    Exiting rather than starting unready, for the same reason a missing
+    KB_TOKENS exits: a crash loop is loud, the rollout that shipped it is
+    refused, and the pods from the previous revision keep serving.
+    """
+    failed = []
+    for q, role, want in CANARIES:
+        hits = idx.search(q, role=role, k=1)
+        got = hits[0]["source"] if hits else None
+        if got != want:
+            failed.append(f"{q!r} as {role}: wanted {want}, got {got or 'nothing'}")
+    # ponytail: one canary per document covers every chunk today because each
+    # document is one chunk. A document long enough to split would need a canary
+    # per chunk, or a corrupted second half would pass unnoticed.
+    if failed:
+        raise SystemExit("the index failed its canary questions, so it is not "
+                         "serving anything:\n  " + "\n  ".join(failed))
+
+
 def main():
     import signal
     started = time.monotonic()
     index()  # fail here, before the port opens, if the corpus is unreadable
+    check_canaries(_index)
     server = ThreadingHTTPServer(("", PORT), Handler)
 
     def on_sigterm(signum, frame):

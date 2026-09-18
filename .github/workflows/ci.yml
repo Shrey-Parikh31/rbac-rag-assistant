@@ -50,6 +50,11 @@ jobs:
       - name: http end to end, against a local server
         run: python test_serve.py
 
+      # Chaos experiment 2, kept as a regression test: four broken vector
+      # stores, and none of them may start and report healthy.
+      - name: a broken index is refused, not served
+        run: python reliability/experiments/broken_index.py
+
       # The regression gate. Per case, not per percentage: see the docstring in
       # eval/retrieval.py for why a percentage cannot see a swap.
       - name: retrieval regression gate

@@ -74,3 +74,4 @@ anything.
 | # | Experiment | Found | Postmortem |
 |---|---|---|---|
 | 1 | Kill a pod under load | ignored `SIGTERM` (31s to die, 2 failed requests); then one pod doing all the work beside an idle replacement | [001](postmortems/001-pod-killed-under-load.md) |
+| 2 | Break the vector store four ways | two quiet failures served as healthy; one gave the **wrong document for half of all questions** with no alert able to fire | [002](postmortems/002-broken-vector-store.md) |
