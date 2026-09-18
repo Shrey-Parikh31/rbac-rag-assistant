@@ -160,6 +160,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
+        if DRAINING.is_set():
+            # Go and reconnect; the new connection will be routed elsewhere.
+            self.send_header("Connection", "close")
+            self.close_connection = True
         self.end_headers()
         self.wfile.write(payload)
 
@@ -232,6 +236,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/healthz":
             # Unauthenticated on purpose: a load balancer has no token, and this
             # says only that the process is up and the index is built.
+            if DRAINING.is_set():
+                return self._send(503, {"ok": False, "draining": True})
             return self._send(200, {"ok": True, "chunks": len(index().chunks),
                                     "dim": rag.EMBED_DIM})
 
@@ -319,12 +325,58 @@ def index():
     return _index
 
 
+# Graceful shutdown, and chaos experiment 1 is why it exists.
+#
+# Killing a pod under load took 31 seconds and dropped 2 of 147,821 requests.
+# The process runs as PID 1 in its container, and the kernel does not deliver
+# SIGTERM to PID 1 unless a handler is installed, so the request to stop was
+# ignored outright. Kubernetes waited out its 30-second grace period and then
+# SIGKILLed a process that was still serving, cutting the requests in flight on
+# connections that had never been told to go elsewhere.
+#
+# Installing the handler is the fix to the first half. The second half is what
+# to do once the signal arrives. Exiting at once reopens a race the
+# orchestrator cannot close for us: the pod is removed from the Service the
+# moment it starts terminating, but that removal takes a moment to reach every
+# node's routing, and a connection routed in that moment finds nobody. So:
+#
+#   1. /healthz reports 503, so anything that routes on readiness stops sending
+#   2. every response carries `Connection: close`, so clients holding a
+#      keep-alive connection reconnect -- through routing that now excludes us
+#   3. keep serving for DRAIN_SECONDS while that happens
+#   4. stop
+#
+# ponytail: requests still in flight at the end of the drain are cut, since
+# handler threads are daemons. By then every client has been told to leave and
+# routing has moved on; waiting on stragglers means joining threads parked on
+# idle keep-alive sockets, which is a timeout per socket to bound it properly.
+DRAIN_SECONDS = float(os.environ.get("KB_DRAIN_SECONDS", "5"))
+DRAINING = threading.Event()
+
+
+def _drain_then_stop(server):
+    time.sleep(DRAIN_SECONDS)
+    server.shutdown()
+
+
 def main():
+    import signal
     started = time.monotonic()
     index()  # fail here, before the port opens, if the corpus is unreadable
+    server = ThreadingHTTPServer(("", PORT), Handler)
+
+    def on_sigterm(signum, frame):
+        if not DRAINING.is_set():
+            DRAINING.set()
+            print(f"SIGTERM: draining for {DRAIN_SECONDS:g}s", file=sys.stderr)
+            threading.Thread(target=_drain_then_stop, args=(server,), daemon=True).start()
+
+    signal.signal(signal.SIGTERM, on_sigterm)
     print(f"index built in {time.monotonic() - started:.2f}s, "
           f"{len(_index.chunks)} chunks; listening on :{PORT}", file=sys.stderr)
-    ThreadingHTTPServer(("", PORT), Handler).serve_forever()
+    server.serve_forever()
+    server.server_close()
+    print("drained; exiting", file=sys.stderr)
 
 
 if __name__ == "__main__":

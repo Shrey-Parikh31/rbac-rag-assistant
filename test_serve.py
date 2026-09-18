@@ -179,7 +179,7 @@ def _free_port():
 
 def _spawn():
     port = _free_port()
-    env = dict(os.environ, KB_TOKENS=KB_TOKENS, PORT=str(port))
+    env = dict(os.environ, KB_TOKENS=KB_TOKENS, PORT=str(port), KB_DRAIN_SECONDS="2")
     p = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "serve.py")],
                          env=env, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
@@ -195,6 +195,35 @@ def _spawn():
     raise SystemExit("server did not become healthy in 30s")
 
 
+def check_drain(proc, base):
+    """SIGTERM starts a drain, not an exit.
+
+    POSIX only: on Windows os.kill(SIGTERM) is TerminateProcess, which no
+    handler can intercept, so there is nothing to test. The chaos experiment in
+    CI tests the same thing under load, in a real cluster; this is the
+    one-second version that fails at the line that broke.
+    """
+    import signal
+    os.kill(proc.pid, signal.SIGTERM)
+    time.sleep(0.5)
+    req = urllib.request.Request(base + "/healthz")
+    try:
+        urllib.request.urlopen(req, timeout=5)
+        raise AssertionError("still reporting healthy after SIGTERM")
+    except urllib.error.HTTPError as e:
+        assert e.code == 503, f"expected 503 while draining, got {e.code}"
+        assert e.headers.get("Connection", "").lower() == "close", \
+            "draining responses must tell the client to reconnect elsewhere"
+    # Still serving real requests during the drain -- that is the point of it.
+    status, _ = call(base, "/search?q=how+late+can+I+enroll", role="student")
+    assert status == 200, f"stopped serving during the drain: {status}"
+    try:
+        proc.wait(timeout=float(os.environ.get("KB_DRAIN_SECONDS", "5")) + 5)
+    except subprocess.TimeoutExpired:
+        raise AssertionError("did not exit after the drain; SIGTERM ignored?")
+    assert proc.returncode == 0, f"exited with {proc.returncode}, not cleanly"
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         run(sys.argv[1].rstrip("/"))
@@ -202,5 +231,8 @@ if __name__ == "__main__":
         proc, base = _spawn()
         try:
             run(base)
+            if os.name == "posix":
+                check_drain(proc, base)
+                print("drain: ok")
         finally:
             proc.kill()
