@@ -154,7 +154,34 @@ def run(base):
     check_load_test_questions(base)
     check_metrics(base)
     check_connection_recycling(base)
+    check_connection_burst(base)
     print("serve: ok")
+
+
+def check_connection_burst(base, n=200):
+    """200 callers arriving in the same instant are all let in.
+
+    With socketserver's default listen backlog of 5, 40 of 200 were refused
+    before the server saw them: invisible to every server-side metric.
+    """
+    import threading
+    if not base.startswith(("http://127.0.0.1", "http://localhost")):
+        return  # through a proxy, the proxy's backlog is what gets tested
+    go = threading.Barrier(n)
+    failures = []
+
+    def one():
+        go.wait()
+        try:
+            urllib.request.urlopen(base + "/healthz", timeout=15).read()
+        except Exception as e:
+            failures.append(type(e).__name__)
+    threads = [threading.Thread(target=one) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not failures, f"{len(failures)} of {n} simultaneous connections failed: {set(failures)}"
 
 
 def check_connection_recycling(base):

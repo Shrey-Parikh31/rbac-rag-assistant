@@ -22,6 +22,7 @@ is what will say when that stops being true, and gunicorn is the upgrade.
 """
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -449,6 +450,21 @@ def index():
 # handler threads are daemons. By then every client has been told to leave and
 # routing has moved on; waiting on stragglers means joining threads parked on
 # idle keep-alive sockets, which is a timeout per socket to bound it properly.
+class Server(ThreadingHTTPServer):
+    # The listen backlog: connections the kernel has accepted and this process
+    # has not yet picked up. socketserver's default is 5.
+    #
+    # Found by accident in experiment 3, as one ConnectionResetError among thirty
+    # simultaneous questions, and then confirmed on purpose: 200 connections
+    # arriving at once, 40 refused. One in five callers turned away before the
+    # server had seen them -- and since it never saw them, no metric here counted
+    # them, and no alert could have fired. The only record is on the client.
+    #
+    # SOMAXCONN is the largest the kernel allows. The accept loop is fast, so the
+    # queue only needs to absorb a burst, not hold a backlog.
+    request_queue_size = socket.SOMAXCONN
+
+
 DRAIN_SECONDS = float(os.environ.get("KB_DRAIN_SECONDS", "5"))
 DRAINING = threading.Event()
 
@@ -504,7 +520,7 @@ def main():
     started = time.monotonic()
     index()  # fail here, before the port opens, if the corpus is unreadable
     check_canaries(_index)
-    server = ThreadingHTTPServer(("", PORT), Handler)
+    server = Server(("", PORT), Handler)
 
     def on_sigterm(signum, frame):
         if not DRAINING.is_set():

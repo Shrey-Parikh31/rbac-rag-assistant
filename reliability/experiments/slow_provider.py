@@ -188,6 +188,12 @@ def verdict(r):
                         f"{r['second_times'][-1]:.1f}s; the breaker should answer at once")
     if any(code != 503 for code, _ in r["second_kinds"]):
         problems.append(f"second wave was not refused fast: {r['second_kinds']}")
+    lost = sum(n for (code, _), n in r["kinds"].items() if code is None)
+    if lost:
+        # A caller whose connection was reset got no answer at all -- not even
+        # the fast 503. The first CI run of this experiment lost one of thirty
+        # that way, which is how the listen backlog of 5 was found.
+        problems.append(f"{lost} caller(s) never got an HTTP response at all")
     if r["during"]["errors"]:
         problems.append(f"/search failed {r['during']['errors']} times while /ask was hung")
     for p in problems:
