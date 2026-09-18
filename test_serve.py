@@ -224,6 +224,41 @@ def _spawn():
     raise SystemExit("server did not become healthy in 30s")
 
 
+def check_breaker():
+    """The circuit breaker's states, against a clock the test controls."""
+    os.environ.setdefault("KB_TOKENS", KB_TOKENS)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from serve import Breaker
+    now = [0.0]
+    b = Breaker(threshold=3, cooldown=30, clock=lambda: now[0])
+
+    for _ in range(2):
+        assert b.allow()
+        b.record(False)
+    assert b.allow(), "opened before reaching the threshold"
+    b.record(True)
+    assert b.failures == 0, "a success must reset the count; failures are consecutive"
+
+    for _ in range(3):
+        b.allow()
+        b.record(False)
+    assert not b.allow(), "three consecutive failures did not open the breaker"
+    assert b.retry_after() == 31
+
+    now[0] = 29.9
+    assert not b.allow(), "let a call through before the cooldown ended"
+    now[0] = 30.0
+    assert b.allow(), "no probe after the cooldown"
+    assert not b.allow(), "more than one probe while half-open"
+    b.record(False)
+    assert not b.allow(), "a failed probe must reopen the breaker"
+
+    now[0] = 60.0
+    assert b.allow()
+    b.record(True)
+    assert b.allow() and b.allow(), "a successful probe must close the breaker"
+
+
 def check_drain(proc, base):
     """SIGTERM starts a drain, not an exit.
 
@@ -257,6 +292,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         run(sys.argv[1].rstrip("/"))
     else:
+        check_breaker()
+        print("breaker: ok")
         proc, base = _spawn()
         try:
             run(base)

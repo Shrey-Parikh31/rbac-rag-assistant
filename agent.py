@@ -29,7 +29,11 @@ import tools
 # 3.7 returned 503 "high demand" on the free tier while 3.6 served normally.
 MODEL = os.environ.get("KB_MODEL", "gemini-3.6-flash")
 MAX_TOOL_CALLS = 5
-REQUEST_TIMEOUT_MS = 60_000
+# 15s per request to the provider. It was 60s, and experiment 3 measured what
+# that costs: with the provider silent, every /ask user waited 63.4 seconds to be
+# told it had failed. A whole successful turn -- two or three requests -- has a
+# p95 of 7.7s, so one request past 15s is not slow, it is gone.
+REQUEST_TIMEOUT_MS = 15_000
 
 SYSTEM = """You are an internal knowledge assistant for a university.
 
@@ -100,7 +104,7 @@ def ask(question, role="student"):
                 maximum_remote_calls=MAX_TOOL_CALLS),
             # Without this the SDK retries a congested endpoint with backoff and
             # no output, which presents as a hang rather than a failure. A
-            # question that has not been answered in a minute is not going to be.
+            # request that has not been answered in 15s is not going to be.
             http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
         ),
     )

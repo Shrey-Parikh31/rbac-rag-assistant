@@ -55,6 +55,14 @@ jobs:
       - name: a broken index is refused, not served
         run: python reliability/experiments/broken_index.py
 
+      # Chaos experiment 3: the model provider accepts connections and never
+      # answers. Bounded wait, bounded concurrency, a breaker that spares the
+      # users who come after, and /search untouched throughout.
+      - name: a silent model provider costs seconds, not minutes
+        env:
+          BURST: "30"
+        run: python reliability/experiments/slow_provider.py
+
       # The regression gate. Per case, not per percentage: see the docstring in
       # eval/retrieval.py for why a percentage cannot see a swap.
       - name: retrieval regression gate

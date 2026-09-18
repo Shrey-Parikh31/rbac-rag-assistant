@@ -150,6 +150,65 @@ class Metrics:
 METRICS = Metrics()
 
 
+class Breaker:
+    """Stop calling a provider that has stopped answering.
+
+    Experiment 3 pointed /ask at a provider that accepts connections and never
+    replies. Every user waited out the full timeout to be told it had failed,
+    and the next user did the same, and the next: the server learned nothing
+    from the previous hundred failures. A timeout bounds how long one user
+    waits. This bounds how many users have to find out the hard way.
+
+    closed     calls go through; consecutive slow failures are counted
+    open       after THRESHOLD of them, calls fail at once for COOLDOWN seconds
+    half-open  after the cooldown, exactly one call goes through to find out;
+               success closes the breaker, failure opens it for another cooldown
+    """
+    def __init__(self, threshold=3, cooldown=30.0, clock=time.monotonic):
+        self.threshold, self.cooldown, self.clock = threshold, cooldown, clock
+        self.lock = threading.Lock()
+        self.failures = 0
+        self.opened_at = None
+        self.probing = False
+
+    def allow(self):
+        with self.lock:
+            if self.opened_at is None:
+                return True
+            if not self.probing and self.clock() - self.opened_at >= self.cooldown:
+                self.probing = True
+                return True
+            return False
+
+    def retry_after(self):
+        with self.lock:
+            if self.opened_at is None:
+                return 0
+            return max(1, int(self.cooldown - (self.clock() - self.opened_at)) + 1)
+
+    def record(self, ok):
+        with self.lock:
+            self.probing = False
+            if ok:
+                self.failures, self.opened_at = 0, None
+                return
+            self.failures += 1
+            if self.failures >= self.threshold or self.opened_at is not None:
+                self.opened_at = self.clock()
+
+
+BREAKER = Breaker()
+
+# The bulkhead. A breaker counts failures as they *finish*, so a burst that
+# arrives all at once gets past it before the first timeout has come back:
+# every one of those requests holds a thread and a socket for the full timeout.
+# Eight at a time, and the ninth is told immediately rather than queued behind
+# a provider that may never answer. /search takes no slot and is never refused
+# because /ask is busy.
+ASK_CONCURRENCY = 8
+ASK_SLOTS = threading.BoundedSemaphore(ASK_CONCURRENCY)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "rbac-rag"
     sys_version = ""  # the Python version is a free gift to an attacker
@@ -167,7 +226,7 @@ class Handler(BaseHTTPRequestHandler):
     # under 2ms.
     disable_nagle_algorithm = True
 
-    def _send(self, code, body):
+    def _send(self, code, body, headers=None):
         # Anything the caller sent and we did not read has to be drained, or the
         # connection is closed with bytes still in flight and the client sees a
         # dropped connection rather than the refusal it was actually given.
@@ -178,6 +237,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(payload)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         # One handler object per connection, so this counts requests on it.
         self._served = getattr(self, "_served", 0) + 1
         if DRAINING.is_set() or self._served >= MAX_REQUESTS_PER_CONNECTION:
@@ -324,8 +385,26 @@ class Handler(BaseHTTPRequestHandler):
             # path and needs no key. Say which half is unavailable.
             return self._send(503, {"error": "no model credentials configured; "
                                              "/search works without them"})
-        import agent  # deferred: the server starts and serves /search without the SDK
-        answer = agent.ask(question, role=role)
+        if not BREAKER.allow():
+            wait = BREAKER.retry_after()
+            return self._send(503, {"error": "the model provider is not responding, "
+                                             "so this was not sent to it; /search "
+                                             "still works", "retry_after_s": wait},
+                              {"Retry-After": str(wait)})
+        if not ASK_SLOTS.acquire(blocking=False):
+            return self._send(503, {"error": f"{ASK_CONCURRENCY} questions are already "
+                                             "waiting on the model provider; try again "
+                                             "shortly. /search still works"},
+                              {"Retry-After": "5"})
+        try:
+            import agent  # deferred: the server starts and serves /search without the SDK
+            answer = agent.ask(question, role=role)
+        finally:
+            ASK_SLOTS.release()
+        # Only failures that cost the caller time open the breaker. A rate
+        # limit is refused in milliseconds, so there is nothing to protect
+        # anyone from by failing it faster.
+        BREAKER.record(answer["status"] not in ("transport_error", "unavailable"))
         return self._send(200 if answer["status"] == "ok" else 502, answer)
 
 

@@ -140,7 +140,7 @@ four. There is no per-query cost tracking in phase one; that is phase five.
 |---|---|
 | `Rate limit reached on the free tier` | The free tier allows about **5 requests per minute** on this model. Normal, not a fault. Wait and retry |
 | `The model provider is busy or timed out` | A 503 or 504. The newest model is the most congested; `gemini-3.7-flash` returned 503 while `gemini-3.6-flash` served normally |
-| A long silence, no output | Should no longer happen. The SDK retried a congested endpoint with backoff and no output, which reads as a hang. A 60 second request timeout now converts it into a message |
+| A long silence, no output | Should no longer happen. The SDK retried a congested endpoint with backoff and no output, which reads as a hang. A 15 second request timeout now converts it into a message, and after three in a row the service stops calling the provider for 30 seconds and says so immediately |
 | `No GEMINI_API_KEY set` | `agent.py` only. `rag.py` still works, so retrieval can be checked without the model |
 
 **The rate limit is a planning constraint, not just an annoyance.** At five
