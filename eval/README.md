@@ -367,3 +367,18 @@ answering a question about a Service.
 
 Every one of them passed while being wrong, which is the only reason the list is
 this long — a measurement that fails loudly gets fixed the same afternoon.
+
+### Instrument bug eighteen
+
+Chaos experiment 1 killed a pod 15 seconds into 40 seconds of load and reported
+zero failures out of 51,035 requests. The killed pod was still alive after the
+load finished.
+
+The server runs as process 1, and Linux does not deliver SIGTERM to process 1
+without a handler, so the pod ignored the request to stop. Kubernetes waited its
+30-second grace period, and the SIGKILL that would have cut connections landed at
+45 seconds -- after the experiment had stopped watching. Extended to 75 seconds,
+it measured 31 seconds to die and 2 failed requests.
+
+**The observation window was shorter than the thing being observed.** Same
+family as all the others; see `reliability/postmortems/001-pod-killed-under-load.md`.
