@@ -99,9 +99,15 @@ Three things to know before this goes in front of anyone:
 1. **The token is the clearance.** Anyone holding a staff token is staff. Treat
    the list the way you treat passwords, and issue one token per person rather
    than one per role, so a single revocation does not lock out a department.
-2. **Rotation is a restart.** The map is read once at startup. Replace the secret
-   and restart. There is deliberately no reload endpoint: an endpoint that
-   changes who can see what is an endpoint worth attacking.
+2. **Rotation depends on how the tokens are delivered.** From `KB_TOKENS` in the
+   environment, the map is read once at startup, so rotating means restarting;
+   rotating without restarting revokes nothing (postmortem 004). From a file
+   (`KB_TOKENS_FILE`, as the Kubernetes manifest does), the server re-reads it
+   within a second of the file changing. On Kubernetes the kubelet takes up to
+   about a minute to update the file, so allow a minute, or rotate and then run
+   `kubectl rollout restart deploy/kb` if it cannot wait. There is deliberately
+   no reload endpoint: an endpoint that changes who can see what is an endpoint
+   worth attacking.
 3. **This is not an identity provider.** For real use, put your existing SSO in
    front and map a verified group claim to a role. What should not change is that
    the role is derived from something the caller cannot write for themselves.

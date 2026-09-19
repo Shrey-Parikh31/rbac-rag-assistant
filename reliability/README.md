@@ -79,4 +79,5 @@ anything.
 |---|---|---|---|
 | 1 | Kill a pod under load | ignored `SIGTERM` (31s to die, 2 failed requests); then one pod doing all the work beside an idle replacement | [001](postmortems/001-pod-killed-under-load.md) |
 | 2 | Break the vector store four ways | two quiet failures served as healthy; one gave the **wrong document for half of all questions** with no alert able to fire | [002](postmortems/002-broken-vector-store.md) |
-| 3 | The model provider goes silent | every `/ask` user waited **63.4s** for an error, and so did everyone after them; now 17s for the first 8, instant for the rest | [003](postmortems/003-silent-model-provider.md) |
+| 3 | The model provider goes silent | every `/ask` user waited **63.4s** for an error, and so did everyone after them; now 17s for the first 8, instant for the rest. Also found: a listen backlog of 5 turning away 1 in 5 of a burst, invisibly | [003](postmortems/003-silent-model-provider.md) |
+| 4 | Revoke a leaked token | rotating the Secret revoked **nothing**, and locked out the legitimate user, until every pod was restarted by hand; now 53s, no restart | [004](postmortems/004-revoking-a-leaked-token.md) |
