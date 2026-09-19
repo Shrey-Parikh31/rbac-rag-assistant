@@ -233,9 +233,25 @@ def _free_port():
         return s.getsockname()[1]
 
 
+def _keyless(env):
+    """The servers these tests start never hold a model key.
+
+    The suite exists to prove the service works with none, which is what CI
+    sees. Locally, rag.py loads this project's .env, so without this a pasted
+    key would quietly reach every test server: the tests would still pass,
+    stop proving the keyless claim, and could spend prepaid credit on anything
+    uncached. NO_DOTENV stops the reload; the pops remove a key already copied
+    into this process by an in-process import of serve.
+    """
+    env["NO_DOTENV"] = "1"
+    env.pop("GEMINI_API_KEY", None)
+    env.pop("GOOGLE_API_KEY", None)
+    return env
+
+
 def _spawn():
     port = _free_port()
-    env = dict(os.environ, KB_TOKENS=KB_TOKENS, PORT=str(port), KB_DRAIN_SECONDS="2")
+    env = _keyless(dict(os.environ, KB_TOKENS=KB_TOKENS, PORT=str(port), KB_DRAIN_SECONDS="2"))
     p = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "serve.py")],
                          env=env, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
@@ -294,7 +310,7 @@ def check_token_reload():
     with open(path, "w") as f:
         f.write("old-token:student")
     port = _free_port()
-    env = dict(os.environ, KB_TOKENS_FILE=path, PORT=str(port))
+    env = _keyless(dict(os.environ, KB_TOKENS_FILE=path, PORT=str(port)))
     env.pop("KB_TOKENS", None)
     p = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "serve.py")],
                          env=env, stderr=subprocess.DEVNULL)
