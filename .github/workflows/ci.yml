@@ -10,7 +10,7 @@
 # /search with no credentials. That is what makes it affordable to gate on
 # quality per push instead of per release: the free tier allows 20 model
 # requests per day per model, so a live evaluation in this workflow would be
-# exhausted before lunch. eval/generate.py runs on a schedule instead.
+# exhausted before lunch. eval/generate.py runs on demand, from eval.yml.
 name: ci
 
 on:
@@ -31,10 +31,10 @@ env:
 jobs:
   # --------------------------------------------------------------- unit + gate
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -76,10 +76,10 @@ jobs:
 
   # ------------------------------------------------------------ static analysis
   static:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install semgrep
@@ -95,9 +95,9 @@ jobs:
   # rule against synthetic traffic and checks it fires, stays quiet, and clears
   # exactly when reliability/alerts.test.yaml says it should.
   reliability:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: alert rules are valid
         run: |
           docker run --rm -v "$PWD/reliability:/r" -w /r --entrypoint promtool \
@@ -109,13 +109,13 @@ jobs:
 
   # ---------------------------------------------------- build, scan, load, ship
   image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [quality, static, reliability]
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: build
         run: docker build -t "$IMAGE:${{ github.sha }}" .
@@ -327,14 +327,14 @@ jobs:
   # the pipeline is green for anyone who clones this without a cloud account.
   # deploy/GOOGLE_CLOUD_SETUP.md is the one-time setup.
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: image
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.GCP_PROJECT_ID != ''
     permissions:
       contents: read
       id-token: write   # the OIDC token that stands in for a stored credential
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No service account key anywhere. GitHub mints a short-lived token that
       # says "this run, from this repository", Google is configured to trust

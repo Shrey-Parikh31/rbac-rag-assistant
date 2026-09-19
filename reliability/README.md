@@ -70,6 +70,12 @@ push.
 too sensitive on a throwaway branch failed the blip test, and the image was not
 built. A test that has never failed has not yet shown it can.
 
+## Support tickets
+
+[`tickets.md`](tickets.md) works five incidents from a user's complaint back to a
+cause, using only what a support engineer could reach. In four of the five,
+every standard health signal was green.
+
 ## Experiments
 
 Each runs against a real cluster, and gets a postmortem whether or not it found
