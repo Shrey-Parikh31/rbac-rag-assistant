@@ -55,57 +55,85 @@ opens in the browser with everything already installed.
 
 ---
 
-## 4. Paste this, all at once
+## 4. Paste two things into Cloud Shell
 
-Change the first line if your project ID is different, then paste the whole
-block into Cloud Shell and press enter. It takes about two minutes and prints
-what you need at the end.
+**4a. Your Gemini key, on its own.** Paste this line, press Enter, then paste
+your key when it asks and press Enter again. The key does not show while you
+paste; it prints only its last four characters so you can check it is the right
+one.
 
 ```bash
-PROJECT_ID="rbac-rag"          # <-- the Project ID from step 2
-REPO="Shrey-Parikh31/rbac-rag-assistant"
+read -rs -p "Paste your Gemini key (it will not show), then press Enter: " GEMINI_KEY; echo; echo "got a key ending in ...${GEMINI_KEY: -4}"
+```
 
+It is a separate step because the block below would otherwise swallow its own
+next line as your key: a pasted block keeps typing.
+
+**4b. Everything else, all at once.** Change the Project ID on the second line if
+yours is different, paste the whole block, press Enter. About two minutes.
+
+```bash
+(
 set -e
+PROJECT_ID="rbac-rag-472913"
+REPO="Shrey-Parikh31/rbac-rag-assistant"
+# Runs inside ( ): if a step fails, this block stops and the terminal stays
+# open with the error on screen, instead of closing and taking it with it.
+# Every step checks before creating, so running it again is safe.
+exists() { "$@" >/dev/null 2>&1; }
+test -n "$GEMINI_KEY" || { echo "Run step 4a first: no Gemini key in this terminal."; exit 1; }
+
 gcloud config set project "$PROJECT_ID"
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 
-# The three services this uses. Everything else stays switched off.
+# The services this uses. Everything else stays switched off.
 gcloud services enable run.googleapis.com secretmanager.googleapis.com \
-  iamcredentials.googleapis.com
+  iam.googleapis.com iamcredentials.googleapis.com sts.googleapis.com
 
 # Tokens for the deployed service. The student one is deliberately public --
 # it goes in the README so anyone can try the demo, and a student can only ever
 # see public material. Staff and admin are random and different from the
 # development ones in the repository, which is public: a token anyone can read
-# is not a clearance.
-STUDENT="demo-student"
-STAFF=$(openssl rand -hex 16)
-ADMIN=$(openssl rand -hex 16)
-printf '%s:student,%s:staff,%s:admin' "$STUDENT" "$STAFF" "$ADMIN" \
-  | gcloud secrets create kb-tokens --data-file=- --replication-policy=automatic
+# is not a clearance. If they already exist they are reused, not replaced.
+if exists gcloud secrets describe kb-tokens; then
+  TOKENS=$(gcloud secrets versions access latest --secret=kb-tokens)
+else
+  TOKENS="demo-student:student,$(openssl rand -hex 16):staff,$(openssl rand -hex 16):admin"
+  printf '%s' "$TOKENS" | gcloud secrets create kb-tokens --data-file=- --replication-policy=automatic
+fi
 
-# Your Gemini key, so the demo can look up questions it has never seen before.
-# Typed in hidden, stored in Secret Manager, never printed. The service uses it
-# for search only; generated answers are switched off on the demo.
-read -rs -p "Paste your Gemini API key and press Enter (it will not show): " GEMINI_KEY; echo
-printf '%s' "$GEMINI_KEY" \
-  | gcloud secrets create gemini-key --data-file=- --replication-policy=automatic
-unset GEMINI_KEY
+# The Gemini key, stored in Secret Manager and never printed. The demo uses it
+# to look up questions it has never seen; generated answers are switched off.
+if exists gcloud secrets describe gemini-key; then
+  printf '%s' "$GEMINI_KEY" | gcloud secrets versions add gemini-key --data-file=-
+else
+  printf '%s' "$GEMINI_KEY" | gcloud secrets create gemini-key --data-file=- --replication-policy=automatic
+fi
 
-# The service reads both secrets at startup.
+# The identity the website runs as: it may read its two secrets and nothing
+# else. Its own account rather than the project's default one, which a new
+# project may not even have yet and which starts with far more access.
+RUNTIME="kb-runtime@${PROJECT_ID}.iam.gserviceaccount.com"
+if ! exists gcloud iam service-accounts describe "$RUNTIME"; then
+  gcloud iam service-accounts create kb-runtime --display-name="rbac-rag website"
+  sleep 15   # a new account takes a few seconds to be usable everywhere
+fi
 for SECRET in kb-tokens gemini-key; do
-  gcloud secrets add-iam-policy-binding "$SECRET" \
-    --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  gcloud secrets add-iam-policy-binding "$SECRET" --member="serviceAccount:$RUNTIME" \
     --role=roles/secretmanager.secretAccessor --quiet > /dev/null
 done
 
-# The identity the pipeline acts as. Deploy permissions, nothing else.
-gcloud iam service-accounts create gh-deployer --display-name="GitHub Actions deployer"
+# The identity the pipeline acts as: may deploy the website and run it as the
+# account above. Nothing else.
 SA="gh-deployer@${PROJECT_ID}.iam.gserviceaccount.com"
-for ROLE in roles/run.admin roles/iam.serviceAccountUser; do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:$SA" --role="$ROLE" --quiet > /dev/null
-done
+if ! exists gcloud iam service-accounts describe "$SA"; then
+  gcloud iam service-accounts create gh-deployer --display-name="GitHub Actions deployer"
+  sleep 15
+fi
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$SA" \
+  --role=roles/run.admin --quiet > /dev/null
+gcloud iam service-accounts add-iam-policy-binding "$RUNTIME" --member="serviceAccount:$SA" \
+  --role=roles/iam.serviceAccountUser --quiet > /dev/null
 
 # Trust GitHub's word instead of storing a password.
 #
@@ -114,19 +142,20 @@ done
 # there is no key to leak, rotate, or find in a log two years from now. The
 # attribute-condition is the part that matters: without it, any repository on
 # GitHub could ask for this permission.
-gcloud iam workload-identity-pools create github --location=global \
-  --display-name="GitHub"
-gcloud iam workload-identity-pools providers create-oidc github \
-  --location=global --workload-identity-pool=github \
-  --display-name="GitHub Actions" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
-  --attribute-condition="assertion.repository=='${REPO}'" \
-  --issuer-uri="https://token.actions.githubusercontent.com"
-
+exists gcloud iam workload-identity-pools describe github --location=global || \
+  gcloud iam workload-identity-pools create github --location=global --display-name="GitHub"
+exists gcloud iam workload-identity-pools providers describe github \
+  --location=global --workload-identity-pool=github || \
+  gcloud iam workload-identity-pools providers create-oidc github \
+    --location=global --workload-identity-pool=github \
+    --display-name="GitHub Actions" \
+    --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+    --attribute-condition="assertion.repository=='${REPO}'" \
+    --issuer-uri="https://token.actions.githubusercontent.com"
 gcloud iam service-accounts add-iam-policy-binding "$SA" \
   --role=roles/iam.workloadIdentityUser \
   --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/attribute.repository/${REPO}" \
-  --quiet
+  --quiet > /dev/null
 
 echo
 echo "==================== GitHub repository VARIABLES ===================="
@@ -135,23 +164,15 @@ echo "GCP_SERVICE_ACCOUNT  = ${SA}"
 echo "GCP_WIF_PROVIDER     = projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github/providers/github"
 echo
 echo "==================== GitHub repository SECRET ======================"
-echo "KB_TOKENS_DEPLOYED   = ${STUDENT}:student,${STAFF}:staff,${ADMIN}:admin"
+echo "KB_TOKENS_DEPLOYED   = ${TOKENS}"
 echo
-echo "The tokens above are shown once here and stored in Secret Manager."
-echo "demo-student is public on purpose. Keep the staff and admin ones private:"
+echo "demo-student is public on purpose. Keep the staff and admin tokens private:"
 echo "anyone holding the admin one can read the confidential document."
+)
 ```
 
-**Already ran an earlier version of this block?** It made a random student token
-and no Gemini secret. Run these two lines instead of starting over; the second
-asks for your key:
-
-```bash
-gcloud secrets versions access latest --secret=kb-tokens | sed 's/^[^:]*:student/demo-student:student/' | gcloud secrets versions add kb-tokens --data-file=-
-read -rs -p "Gemini API key: " K; echo; printf '%s' "$K" | gcloud secrets create gemini-key --data-file=-; unset K; gcloud secrets add-iam-policy-binding gemini-key --member="serviceAccount:$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')-compute@developer.gserviceaccount.com" --role=roles/secretmanager.secretAccessor --quiet
-```
-
-Then update `KB_TOKENS_DEPLOYED` in GitHub so its student token reads `demo-student`.
+If it stops with an error, the error stays on screen: send a screenshot of it.
+Running the block again after a fix is safe, and reuses anything already made.
 
 ---
 

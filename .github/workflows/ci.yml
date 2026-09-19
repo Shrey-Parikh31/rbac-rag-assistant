@@ -379,6 +379,7 @@ jobs:
             --no-traffic --tag candidate \
             --min-instances 0 --max-instances 1 \
             --memory 512Mi --cpu 1 \
+            --service-account "kb-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --set-secrets "KB_TOKENS=kb-tokens:latest,GEMINI_API_KEY=gemini-key:latest" \
             --set-env-vars "KB_ASK_DISABLED=1" \
             --quiet
