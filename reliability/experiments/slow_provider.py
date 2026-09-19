@@ -112,6 +112,7 @@ def main():
     port = _free_port()
     env = dict(os.environ, KB_TOKENS=f"{TOKEN}:student", PORT=str(port),
                GEMINI_API_KEY="not-a-real-key",
+               NO_DOTENV="1",  # else serve.py re-reads .env and swaps in the real key
                GOOGLE_GEMINI_BASE_URL=f"http://127.0.0.1:{pit_port}")
     env.pop("GOOGLE_API_KEY", None)
     proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "serve.py")], env=env,

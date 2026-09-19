@@ -21,6 +21,33 @@ import functools
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_dotenv():
+    """Read this project's own .env so its key lives in its own folder.
+
+    The key used to come only from a Windows-wide GEMINI_API_KEY, which every
+    other project on the machine also saw, so revoking one project's key broke
+    this one. Values in .env win over the OS so a stray machine-wide key cannot
+    shadow them; empty values are skipped. Every entry point imports this module
+    (directly or via tools.py), so loading here covers all of them.
+
+    NO_DOTENV=1 skips it. The reliability experiments set that, because they
+    launch serve.py with the key deliberately removed or faked, and re-reading
+    .env would put the real key back: the experiment would stop testing the
+    failure it exists to test, and start spending money.
+    """
+    path = os.path.join(HERE, ".env")
+    if os.environ.get("NO_DOTENV") == "1" or not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            m = re.match(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$", line)
+            if m and m.group(2):
+                os.environ[m.group(1)] = re.sub(r"^(['\"])(.*)\1$", r"\2", m.group(2))
+
+
+_load_dotenv()
 VECTORS = os.environ.get("KB_VECTORS", os.path.join(HERE, "vectors.json"))
 EMBED_MODEL = os.environ.get("KB_EMBED_MODEL", "gemini-embedding-001")
 

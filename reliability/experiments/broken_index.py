@@ -88,7 +88,8 @@ def variants(workdir):
 
 def probe(vectors_path):
     port = _free_port()
-    env = dict(os.environ, KB_TOKENS=TOKEN, PORT=str(port), KB_VECTORS=vectors_path)
+    # NO_DOTENV: otherwise serve.py re-reads .env and the removed key comes back.
+    env = dict(os.environ, KB_TOKENS=TOKEN, PORT=str(port), KB_VECTORS=vectors_path, NO_DOTENV="1")
     env.pop("GEMINI_API_KEY", None)   # a missing vector must not be quietly re-embedded
     env.pop("GOOGLE_API_KEY", None)
     proc = subprocess.Popen([sys.executable, os.path.join(ROOT, "serve.py")], env=env,
