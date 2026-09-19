@@ -677,3 +677,40 @@ anyone can read, and the confidential document is one request away. The deployed
 service therefore takes randomly generated tokens from Secret Manager, and
 `test_serve.py` reads its token map from the environment rather than hardcoding
 it. Making something reachable changed what the same string means.
+
+---
+
+## ADR-20: What Layer 2 changed, and why each change was measured first
+
+**Status:** accepted
+
+**Context.** Layer 2 set objectives, alerts on them, and then broke the system
+four ways on purpose. Every change below exists because an experiment measured a
+failure first; none was added because it is standard practice. The detail is in
+`reliability/postmortems/`.
+
+**Decisions.**
+
+| Change | Measured before | After |
+|---|---|---|
+| SLOs of 99.5% available and 99% under 50ms on `/search`, with multi-window burn-rate alerts | a static threshold would page on a one-minute blip at 9% errors | `promtool` proves it does not, and that a real incident pages and then clears |
+| Handle `SIGTERM`: 503 on `/healthz`, `Connection: close`, drain 5s | 31s to terminate a pod, 2 of 147,821 requests failed | 7s, 0 of 137,882 |
+| Recycle each connection after 100 requests | the replacement pod served 0 requests beside a survivor serving 48,838 | 55,537 beside 70,035 |
+| Canary question per document at startup | a shuffled index started healthy and served the wrong document for 4 of 8 questions | refused before it can serve |
+| Provider timeout 60s to 15s, circuit breaker, bulkhead of 8 | every `/ask` user waited 63.4s for an error, indefinitely | 17s for the first 8, then 0.00s with an explanation |
+| Listen backlog 5 to `SOMAXCONN` | 40 of 200 simultaneous connections refused, invisibly | 0 of 200 |
+| Tokens from a mounted file, reloaded within a second | rotating the Secret left the leaked token valid and the new one refused, indefinitely | leaked token refused everywhere 53s after rotation |
+| Read-only vector cache when serving | every new public question would be stored forever, and two at once would race on one file | bounded LRU of 1,024; file never written |
+
+**Consequences.** Four experiments now run on every push as regression tests,
+and each was seen to fail before it was trusted.
+
+**The pattern worth recording:** five of the failures were invisible to every
+aggregate health signal. The pod imbalance returned 100% success. The shuffled
+index returned 200s with confident citations. The refused connections were never
+counted because they never arrived. The unrevoked token looked like a working
+rotation. The ignored `SIGTERM` passed its first experiment because the
+experiment stopped watching before the failure happened. The measurements that
+found them were built for the specific question: per-pod counts, known answers,
+client-side counts, both tokens probed side by side, and an observation window
+longer than the grace period.
