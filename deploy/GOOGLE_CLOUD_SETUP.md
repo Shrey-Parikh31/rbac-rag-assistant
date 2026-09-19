@@ -11,6 +11,13 @@ a few hundred. The realistic bill is **$0.00**.
 
 Step 6 sets a budget alert anyway, because "realistic" is not "guaranteed".
 
+**The one way it could cost more.** The student token is public so anyone can
+try the demo, which means anyone can also flood it on purpose. The service is
+capped at one running copy, which bounds how much can be billed at once, but
+someone flooding it for days could still pass $5 before you notice. The budget
+alert emails you; it does not stop anything. The off switch is one command:
+`gcloud run services delete kb --region us-central1`.
+
 ---
 
 ## 1. Make the image public
@@ -66,19 +73,31 @@ PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectN
 gcloud services enable run.googleapis.com secretmanager.googleapis.com \
   iamcredentials.googleapis.com
 
-# Tokens for the deployed service. Random, and different from the development
-# ones in the repository -- that repository is public, so a token anyone can
-# read is not a clearance.
-STUDENT=$(openssl rand -hex 16)
+# Tokens for the deployed service. The student one is deliberately public --
+# it goes in the README so anyone can try the demo, and a student can only ever
+# see public material. Staff and admin are random and different from the
+# development ones in the repository, which is public: a token anyone can read
+# is not a clearance.
+STUDENT="demo-student"
 STAFF=$(openssl rand -hex 16)
 ADMIN=$(openssl rand -hex 16)
 printf '%s:student,%s:staff,%s:admin' "$STUDENT" "$STAFF" "$ADMIN" \
   | gcloud secrets create kb-tokens --data-file=- --replication-policy=automatic
 
-# The service reads that secret at startup.
-gcloud secrets add-iam-policy-binding kb-tokens \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role=roles/secretmanager.secretAccessor --quiet
+# Your Gemini key, so the demo can look up questions it has never seen before.
+# Typed in hidden, stored in Secret Manager, never printed. The service uses it
+# for search only; generated answers are switched off on the demo.
+read -rs -p "Paste your Gemini API key and press Enter (it will not show): " GEMINI_KEY; echo
+printf '%s' "$GEMINI_KEY" \
+  | gcloud secrets create gemini-key --data-file=- --replication-policy=automatic
+unset GEMINI_KEY
+
+# The service reads both secrets at startup.
+for SECRET in kb-tokens gemini-key; do
+  gcloud secrets add-iam-policy-binding "$SECRET" \
+    --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+    --role=roles/secretmanager.secretAccessor --quiet > /dev/null
+done
 
 # The identity the pipeline acts as. Deploy permissions, nothing else.
 gcloud iam service-accounts create gh-deployer --display-name="GitHub Actions deployer"
@@ -119,8 +138,20 @@ echo "==================== GitHub repository SECRET ======================"
 echo "KB_TOKENS_DEPLOYED   = ${STUDENT}:student,${STAFF}:staff,${ADMIN}:admin"
 echo
 echo "The tokens above are shown once here and stored in Secret Manager."
-echo "Anyone holding the admin one can read the confidential document."
+echo "demo-student is public on purpose. Keep the staff and admin ones private:"
+echo "anyone holding the admin one can read the confidential document."
 ```
+
+**Already ran an earlier version of this block?** It made a random student token
+and no Gemini secret. Run these two lines instead of starting over; the second
+asks for your key:
+
+```bash
+gcloud secrets versions access latest --secret=kb-tokens | sed 's/^[^:]*:student/demo-student:student/' | gcloud secrets versions add kb-tokens --data-file=-
+read -rs -p "Gemini API key: " K; echo; printf '%s' "$K" | gcloud secrets create gemini-key --data-file=-; unset K; gcloud secrets add-iam-policy-binding gemini-key --member="serviceAccount:$(gcloud projects describe $(gcloud config get-value project) --format='value(projectNumber)')-compute@developer.gserviceaccount.com" --role=roles/secretmanager.secretAccessor --quiet
+```
+
+Then update `KB_TOKENS_DEPLOYED` in GitHub so its student token reads `demo-student`.
 
 ---
 

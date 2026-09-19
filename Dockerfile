@@ -12,9 +12,13 @@ FROM python:3.12-slim
 # image that picks up patches is a feature here. An unpatched pin that fails the
 # CVE gate every week is how teams learn to pass `--exit-code 0`.
 
+# KB_READ_ONLY_CACHE: a server never rewrites vectors.json. New questions are
+# embedded into a bounded in-memory cache instead; see rag._embed_uncached for
+# the two ways the development behaviour would fail in public.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
+    KB_READ_ONLY_CACHE=1 \
     PORT=8080
 
 WORKDIR /app

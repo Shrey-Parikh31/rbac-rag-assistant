@@ -353,7 +353,16 @@ class Handler(BaseHTTPRequestHandler):
             # implementations of one security rule is one implementation and one
             # hole waiting to be found.
             tools.set_role(role)
-            result = tools.search_docs(q)
+            try:
+                result = tools.search_docs(q)
+            except rag.EmbeddingUnavailable:
+                # A question the cache has never seen, and the embedding provider
+                # is unreachable, out of quota, or not configured. Every question
+                # already in the cache still works, so this is one question that
+                # cannot be looked up right now -- a 503, not the 500 of a bug.
+                return self._send(503, {"error": "this question is new and cannot be "
+                                                 "looked up right now; try again shortly"},
+                                  {"Retry-After": "30"})
             METRICS.outcome("no_match" if result == tools.NO_MATCH else
                             "restricted" if result.startswith(tools.RESTRICTED_PREFIX)
                             else "answer")
@@ -381,6 +390,13 @@ class Handler(BaseHTTPRequestHandler):
         if not question:
             return self._send(400, {"error": "question is required"})
 
+        if os.environ.get("KB_ASK_DISABLED") == "1":
+            # The public demo holds a model key so that new questions can be
+            # embedded for /search, and deliberately does not spend it on
+            # generated answers: the free tier allows 20 generations a day, and
+            # anyone holding the public student token could use them all up.
+            return self._send(503, {"error": "generated answers are turned off on this "
+                                             "deployment; /search works"})
         if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
             # Not an error in the deployment: /search is the whole retrieval
             # path and needs no key. Say which half is unavailable.

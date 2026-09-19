@@ -47,4 +47,50 @@ assert any(h["role"] == "confidential" for h in admin), "admin blocked from conf
 for h in idx.search("faculty compensation", role="intern"):
     assert h["role"] == "public", "unknown role defaulted to more than public"
 
+# --- serving: the vector file is read-only and new questions are bounded -----
+# A fake provider, so this needs no key and no network. What it proves: a server
+# never rewrites vectors.json or grows the shared cache, a repeated new question
+# is asked of the provider once, and a provider failure is one named error type.
+import os
+import types as _t
+import rag
+
+calls = []
+
+
+class _Fake:
+    def embed_content(self, model, contents, config):
+        calls.append(list(contents))
+        if contents == ["make the provider fail"]:
+            raise ConnectionError("provider is down")
+        return _t.SimpleNamespace(embeddings=[_t.SimpleNamespace(values=[1.0] * rag.EMBED_DIM)
+                                              for _ in contents])
+
+
+saved = (rag._client, os.environ.get("KB_READ_ONLY_CACHE"), os.environ.get("GEMINI_API_KEY"))
+rag._client = _t.SimpleNamespace(models=_Fake())   # the SDK's shape: client.models.embed_content
+os.environ["KB_READ_ONLY_CACHE"] = "1"
+os.environ["GEMINI_API_KEY"] = "fake-for-test"
+try:
+    size, mtime = len(rag._cache()), os.path.getmtime(rag.VECTORS)
+    for _ in range(3):
+        v = rag.embed(["a question nobody has asked before"], "RETRIEVAL_QUERY")
+        assert v.shape == (1, rag.EMBED_DIM)
+    assert len(calls) == 1, f"a repeated new question reached the provider {len(calls)} times"
+    assert len(rag._cache()) == size, "a server grew the shared vector cache"
+    assert os.path.getmtime(rag.VECTORS) == mtime, "a server rewrote vectors.json"
+    try:
+        rag.embed(["make the provider fail"], "RETRIEVAL_QUERY")
+        raise AssertionError("a provider failure did not raise")
+    except rag.EmbeddingUnavailable:
+        pass
+finally:
+    rag._client = saved[0]
+    for name, value in zip(("KB_READ_ONLY_CACHE", "GEMINI_API_KEY"), saved[1:]):
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    rag._embed_uncached.cache_clear()
+
 print("ok")

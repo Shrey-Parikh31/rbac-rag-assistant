@@ -16,6 +16,7 @@ import json
 import time
 import hashlib
 import textwrap
+import functools
 
 import numpy as np
 
@@ -132,6 +133,47 @@ def _cache():
     return _vectors
 
 
+class EmbeddingUnavailable(RuntimeError):
+    """A text needs embedding and the provider cannot do it right now.
+
+    Its own type so a server can answer 503 -- "this one question cannot be
+    looked up at the moment" -- instead of a 500 that reads as a bug, while
+    every other RuntimeError stays a 500.
+    """
+
+
+def _call(batch, task):
+    """One request to the embedding provider. Any failure becomes one error type."""
+    global _client
+    try:
+        from google import genai
+        from google.genai import types
+        if _client is None:
+            _client = genai.Client()
+        r = _client.models.embed_content(
+            model=EMBED_MODEL, contents=batch,
+            config=types.EmbedContentConfig(task_type=task, output_dimensionality=EMBED_DIM))
+    except Exception as e:
+        raise EmbeddingUnavailable(f"embedding provider failed: {type(e).__name__}: {e}") from e
+    return [[round(float(v), 6) for v in e.values] for e in r.embeddings]
+
+
+@functools.lru_cache(maxsize=1024)
+def _embed_uncached(text, task):
+    """A vector for a text the committed cache has never seen, kept in memory only.
+
+    Used when serving. The development path in embed() adds every new text to
+    the cache and rewrites vectors.json, which is right for building the golden
+    set and wrong for a public server, in two ways found by reading it before
+    going live: the cache would grow by one vector per distinct question a
+    stranger typed until the process ran out of memory, and two new questions
+    arriving together would have two threads rewriting the same file. A server
+    treats the file as read-only and keeps the last 1,024 new questions here,
+    about 3KB each as float32.
+    """
+    return np.array(_call([text], task)[0], dtype=np.float32)
+
+
 def embed(texts, task):
     """Vectors for `texts`, calling the API only for whatever is not cached.
 
@@ -140,36 +182,36 @@ def embed(texts, task):
     a question and the passage that answers it differently, and using one
     setting for both measurably degrades retrieval.
     """
-    global _client
     cache = _cache()
     missing = [t for t in texts if _key(t, task) not in cache]
-    if missing:
-        if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
-            # Fail loudly rather than fall back to something weaker. A silent
-            # downgrade would change what the tests measure without saying so,
-            # which is the exact failure mode this project keeps tripping over.
-            raise RuntimeError(
-                f"{len(missing)} text(s) are not in {os.path.basename(VECTORS)} "
-                f"and no GEMINI_API_KEY is set, so they cannot be embedded. The "
-                f"cache covers the corpus and every question in the golden set; "
-                f"a new query needs the key once. "
-                f"First missing: {missing[0][:60]!r}")
-        from google import genai
-        from google.genai import types
-        if _client is None:
-            _client = genai.Client()
-        started = time.monotonic()
-        for i in range(0, len(missing), 100):        # the API caps a batch
-            batch = missing[i:i + 100]
-            r = _client.models.embed_content(
-                model=EMBED_MODEL, contents=batch,
-                config=types.EmbedContentConfig(
-                    task_type=task, output_dimensionality=EMBED_DIM))
-            for text, e in zip(batch, r.embeddings):
-                cache[_key(text, task)] = [round(float(v), 6) for v in e.values]
-        global EMBED_SECONDS
+    if not missing:
+        return _unit(np.array([cache[_key(t, task)] for t in texts], dtype=np.float32))
+
+    if not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+        # Fail loudly rather than fall back to something weaker. A silent
+        # downgrade would change what the tests measure without saying so,
+        # which is the exact failure mode this project keeps tripping over.
+        raise EmbeddingUnavailable(
+            f"{len(missing)} text(s) are not in {os.path.basename(VECTORS)} "
+            f"and no GEMINI_API_KEY is set, so they cannot be embedded. The "
+            f"cache covers the corpus and every question in the golden set; "
+            f"a new query needs the key once. "
+            f"First missing: {missing[0][:60]!r}")
+
+    global EMBED_SECONDS
+    started = time.monotonic()
+    if os.environ.get("KB_READ_ONLY_CACHE") == "1":
+        vecs = [np.array(cache[_key(t, task)], dtype=np.float32) if _key(t, task) in cache
+                else _embed_uncached(t, task) for t in texts]
         EMBED_SECONDS += time.monotonic() - started
-        _write_json(VECTORS, cache)
+        return _unit(np.stack(vecs))
+
+    for i in range(0, len(missing), 100):        # the API caps a batch
+        batch = missing[i:i + 100]
+        for text, v in zip(batch, _call(batch, task)):
+            cache[_key(text, task)] = v
+    EMBED_SECONDS += time.monotonic() - started
+    _write_json(VECTORS, cache)
     return _unit(np.array([cache[_key(t, task)] for t in texts], dtype=np.float32))
 
 
