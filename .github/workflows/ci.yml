@@ -326,6 +326,20 @@ jobs:
   # Skipped entirely until GCP_PROJECT_ID is set as a repository variable, so
   # the pipeline is green for anyone who clones this without a cloud account.
   # deploy/GOOGLE_CLOUD_SETUP.md is the one-time setup.
+  #
+  # A skipped job on GitHub shows no reason at all, which read as "deploy is
+  # broken" when it was waiting for configuration. This says why, on the run page.
+  deploy-waiting:
+    runs-on: ubuntu-24.04
+    needs: image
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.GCP_PROJECT_ID == ''
+    steps:
+      - run: |
+          msg="Deploy not run: the repository variable GCP_PROJECT_ID is not set yet. Everything else passed and the image is published. Finish deploy/GOOGLE_CLOUD_SETUP.md to go live."
+          echo "::notice title=Deploy is waiting for setup::$msg"
+          echo "### Deploy is waiting for setup" >> "$GITHUB_STEP_SUMMARY"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+
   deploy:
     runs-on: ubuntu-24.04
     needs: image
