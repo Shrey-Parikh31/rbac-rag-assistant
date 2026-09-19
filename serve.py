@@ -54,32 +54,111 @@ MAX_QUERY = 500  # a question, not a payload
 MAX_REQUESTS_PER_CONNECTION = 100
 
 
+def parse_tokens(raw):
+    """`token:role,token:role` -> {token: role}. ValueError if malformed."""
+    known = set(tools.TOOL_ACCESS["search_docs"])
+    out = {}
+    for pair in raw.strip().split(","):
+        token, _, role = pair.strip().partition(":")
+        if not token or role not in known:
+            raise ValueError(f"bad KB_TOKENS entry {pair!r}; expected token:role "
+                             f"with role in {sorted(known)}")
+        out[token] = role
+    return out
+
+
+# Where the token map comes from, and why it can come from a file.
+#
+# Experiment 4 revoked a leaked token by rotating the Secret, then probed for
+# 150 seconds. The leaked token was still accepted by every pod, and the new
+# legitimate one was refused by every pod: a Pod's environment is fixed when it
+# starts, so rotating a Secret consumed as an environment variable revokes
+# nothing and locks out the rightful owner, until somebody remembers to restart
+# everything.
+#
+# A Secret mounted as a file is different: the kubelet rewrites the file in
+# place when the Secret changes. With KB_TOKENS_FILE set, the map is re-read
+# from that file at most once a second, and a change takes effect without a
+# restart.
+#
+# KB_TOKENS from the environment stays supported, for local runs and for Cloud
+# Run, where a Secret changes by deploying a new revision anyway.
+TOKENS_FILE = os.environ.get("KB_TOKENS_FILE")
+
+
+def _read_raw():
+    if TOKENS_FILE:
+        with open(TOKENS_FILE, encoding="utf-8") as f:
+            return f.read()
+    return os.environ.get("KB_TOKENS", "")
+
+
 def load_tokens():
-    """`token:role,token:role` from KB_TOKENS. Absent or malformed is fatal.
+    """The token map at startup. Absent or malformed is fatal.
 
     Failing at startup rather than per-request: an unauthenticated server that
     answers is worse than one that never came up, and a crash loop is visible
     in a way that a quietly permissive deployment is not.
     """
-    raw = os.environ.get("KB_TOKENS", "").strip()
+    try:
+        raw = _read_raw().strip()
+    except OSError as e:
+        raise SystemExit(f"KB_TOKENS_FILE={TOKENS_FILE!r} cannot be read: {e}")
     if not raw:
         raise SystemExit(
             "KB_TOKENS is not set, so no caller could be identified and every\n"
             "request would have to be refused. Set it to token:role pairs, e.g.\n"
             '  KB_TOKENS="devstudent:student,devstaff:staff,devadmin:admin"\n'
             "Use real secrets outside development.")
-    known = set(tools.TOOL_ACCESS["search_docs"])
-    out = {}
-    for pair in raw.split(","):
-        token, _, role = pair.strip().partition(":")
-        if not token or role not in known:
-            raise SystemExit(f"bad KB_TOKENS entry {pair!r}; expected token:role "
-                             f"with role in {sorted(known)}")
-        out[token] = role
-    return out
+    try:
+        return parse_tokens(raw)
+    except ValueError as e:
+        raise SystemExit(str(e))
 
 
-TOKENS = load_tokens()
+class Tokens:
+    """The live token map, refreshed from KB_TOKENS_FILE when it changes.
+
+    A rotation that arrives malformed is logged and ignored, and the previous
+    map stays in force. That matches what happens at startup, where a bad map
+    stops the new pod and the old pods keep serving: a typo made in a hurry
+    during an incident should not also lock every user out. The cost is that a
+    malformed revocation does not revoke, and the log line says so.
+    """
+    def __init__(self):
+        self.map = load_tokens()
+        self.raw = _read_raw() if TOKENS_FILE else None
+        self.checked = time.monotonic()
+        self.lock = threading.Lock()
+
+    def get(self, token):
+        if TOKENS_FILE and time.monotonic() - self.checked >= 1.0:
+            self._refresh()
+        return self.map.get(token)
+
+    def _refresh(self):
+        with self.lock:
+            if time.monotonic() - self.checked < 1.0:
+                return
+            self.checked = time.monotonic()
+            try:
+                raw = _read_raw()
+            except OSError as e:
+                print(f"tokens: cannot read {TOKENS_FILE}: {e}; keeping previous map",
+                      file=sys.stderr)
+                return
+            if raw == self.raw:
+                return
+            self.raw = raw
+            try:
+                self.map = parse_tokens(raw)
+                print(f"tokens: reloaded, {len(self.map)} token(s)", file=sys.stderr)
+            except ValueError as e:
+                print(f"tokens: rotation REJECTED, previous map still in force: {e}",
+                      file=sys.stderr)
+
+
+TOKENS = Tokens()
 
 
 class Metrics:
@@ -253,7 +332,7 @@ class Handler(BaseHTTPRequestHandler):
         """The caller's role, or None. Never read from a header the caller picks."""
         auth = self.headers.get("Authorization", "")
         scheme, _, token = auth.partition(" ")
-        return TOKENS.get(token) if scheme.lower() == "bearer" else None
+        return TOKENS.get(token) if scheme.lower() == "bearer" and token else None
 
     _read = 0  # bytes of the request body consumed so far
 

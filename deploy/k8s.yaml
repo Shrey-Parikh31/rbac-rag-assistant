@@ -57,14 +57,21 @@ spec:
             # else is read-only, which is why the root filesystem can be.
             - name: KB_TICKETS
               value: /tmp/tickets.jsonl
-          envFrom:
-            - secretRef: { name: kb-tokens }
+            # The token map as a file, not an environment variable. Experiment
+            # 4: with envFrom, rotating the Secret after a leak left the leaked
+            # token working on every pod and the new one refused on every pod,
+            # indefinitely, because a Pod's environment never changes. A mounted
+            # Secret is rewritten in place by the kubelet, and serve.py re-reads
+            # it within a second of the change arriving.
+            - name: KB_TOKENS_FILE
+              value: /etc/kb/KB_TOKENS
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
+            - { name: tokens, mountPath: /etc/kb, readOnly: true }
           resources:
             requests: { cpu: 100m, memory: 128Mi }
             limits: { cpu: 500m, memory: 512Mi }
@@ -87,6 +94,13 @@ spec:
             failureThreshold: 3
       volumes:
         - { name: tmp, emptyDir: {} }
+        # No subPath: a subPath mount is a snapshot and never updates, which
+        # would reproduce exactly the failure this mount exists to fix.
+        - name: tokens
+          # 0444: the files are owned by root and the server runs as 10001, so
+          # 0440 would make its own token map unreadable to it. Read-only for
+          # everyone is fine in a single-container pod with a read-only root.
+          secret: { secretName: kb-tokens, defaultMode: 0444 }
 ---
 apiVersion: v1
 kind: Service

@@ -286,6 +286,50 @@ def check_breaker():
     assert b.allow() and b.allow(), "a successful probe must close the breaker"
 
 
+def check_token_reload():
+    """A rotated token file takes effect without a restart; a malformed one is ignored."""
+    import tempfile
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "KB_TOKENS")
+    with open(path, "w") as f:
+        f.write("old-token:student")
+    port = _free_port()
+    env = dict(os.environ, KB_TOKENS_FILE=path, PORT=str(port))
+    env.pop("KB_TOKENS", None)
+    p = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "serve.py")],
+                         env=env, stderr=subprocess.DEVNULL)
+    base = f"http://127.0.0.1:{port}"
+
+    def status(token):
+        req = urllib.request.Request(base + "/search?q=How+late+can+I+enroll+in+a+course%3F")
+        req.add_header("Authorization", f"Bearer {token}")
+        try:
+            return urllib.request.urlopen(req, timeout=10).status
+        except urllib.error.HTTPError as e:
+            return e.code
+    try:
+        for _ in range(60):
+            try:
+                urllib.request.urlopen(base + "/healthz", timeout=1)
+                break
+            except OSError:
+                time.sleep(0.25)
+        assert status("old-token") == 200 and status("new-token") == 401
+
+        with open(path, "w") as f:
+            f.write("new-token:student")
+        time.sleep(1.5)
+        assert status("old-token") == 401, "a revoked token still works after rotation"
+        assert status("new-token") == 200, "the rotated-in token is not accepted"
+
+        with open(path, "w") as f:
+            f.write("this is not a token map")
+        time.sleep(1.5)
+        assert status("new-token") == 200, "a malformed rotation locked out a valid token"
+    finally:
+        p.kill()
+
+
 def check_drain(proc, base):
     """SIGTERM starts a drain, not an exit.
 
@@ -321,6 +365,8 @@ if __name__ == "__main__":
     else:
         check_breaker()
         print("breaker: ok")
+        check_token_reload()
+        print("token reload: ok")
         proc, base = _spawn()
         try:
             run(base)
