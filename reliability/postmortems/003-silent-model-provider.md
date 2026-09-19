@@ -87,6 +87,37 @@ reported three failures: requests past the bulkhead, the second wave waiting
 16.3 seconds, and the second wave reaching the provider. It was not accepted
 until it had caught something.
 
+## Found on the way: one caller in five turned away at the door
+
+The first CI run after the fixes reported something the experiment was not
+looking for:
+
+```
+1 x  HTTP None  client gave up: ConnectionResetError
+```
+
+One of thirty callers got no HTTP response at all — not the fast 503, nothing.
+The connection was reset before the server saw it.
+
+`socketserver`'s default listen backlog is **5**: five connections the kernel has
+accepted and the process has not yet picked up. Thirty arriving in the same
+instant overflow it. Confirmed on purpose with 200 simultaneous connections to
+`/healthz`: **40 refused**, one in five.
+
+**This is the only failure in Layer 2 that no server-side measurement could
+detect.** A refused connection never reaches the process, so it is not counted,
+not timed, not logged, and not an error in any SLI. Every dashboard here would
+have shown 100% availability while a fifth of a burst was turned away. The only
+evidence was on the client, and only because this experiment happened to count
+responses rather than errors.
+
+The backlog is now `socket.SOMAXCONN`. `test_serve.py` opens 200 connections at
+once and requires every one to be answered, and this experiment's verdict fails
+if any caller receives no HTTP response.
+
+It also sharpens the list in `reliability/README.md` of what the SLIs cannot see:
+measuring at the server means measuring only the requests that got in.
+
 ## Action items
 
 | | Status |
@@ -95,4 +126,6 @@ until it had caught something.
 | Circuit breaker: 3 consecutive slow failures, 30s cooldown, single probe | done, with a fake-clock unit test of every state |
 | Bulkhead: 8 concurrent `/ask` | done |
 | Experiment runs in CI and fails on regression | done |
+| Listen backlog 5 → `SOMAXCONN`; a 200-connection burst test | done |
 | Breaker state as a metric and an alert, so an open breaker is visible without reading logs | **open** — belongs with Layer 5 |
+| A client-side probe measuring availability from outside, since the server cannot count what never reaches it | **open** — belongs with Layer 5 |

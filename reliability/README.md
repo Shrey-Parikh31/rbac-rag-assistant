@@ -36,6 +36,10 @@ Being clear about the blind spots is most of the work:
   lower bound on what users experience, not a measurement of it.
 - **Uneven load.** In experiment 1 one pod served 48,838 requests while its
   replacement served none, and every request succeeded. See postmortem 001.
+- **A connection refused at the door.** With the default listen backlog of 5, a
+  burst of 200 connections lost 40 before the process saw them: not counted, not
+  timed, not logged. Measuring at the server means measuring only the requests
+  that got in. See postmortem 003.
 
 ## Alerts
 

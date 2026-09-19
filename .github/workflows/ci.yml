@@ -294,6 +294,12 @@ jobs:
             || { echo "FAIL: requests failed while a pod was being replaced"; exit 1; }
           echo "no request failed while a pod was killed and replaced"
 
+      # Experiment 4: a token leaks and is revoked by rotating the Secret. How
+      # long does the leaked one keep reading documents? Runs last because it
+      # changes the tokens every later step would need.
+      - name: chaos, revoke a leaked token
+        run: bash reliability/experiments/rotate_tokens.sh 150
+
       - name: what the cluster saw
         if: always()
         run: |
