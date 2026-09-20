@@ -395,7 +395,7 @@ jobs:
             --memory 512Mi --cpu 1 \
             --service-account "kb-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
             --set-secrets "KB_TOKENS=kb-tokens:latest,GEMINI_API_KEY=gemini-key:latest" \
-            --set-env-vars "KB_ASK_DISABLED=1" \
+            --set-env-vars "KB_ASK_DISABLED=1,KB_DEMO_TOKEN=demo-student" \
             --quiet
           # max-instances 1: the student token is public, so the worst case is
           # someone flooding it on purpose, and one instance is the most that
