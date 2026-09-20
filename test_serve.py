@@ -107,7 +107,7 @@ def check_metrics(base):
 
 
 def run(base):
-    status, body = call(base, "/healthz")
+    status, body = call(base, "/health")
     assert status == 200 and body["ok"], body
     assert body["chunks"] > 0, "server is up with an empty index"
 
@@ -173,7 +173,7 @@ def check_connection_burst(base, n=200):
     def one():
         go.wait()
         try:
-            urllib.request.urlopen(base + "/healthz", timeout=15).read()
+            urllib.request.urlopen(base + "/health", timeout=15).read()
         except Exception as e:
             failures.append(type(e).__name__)
     threads = [threading.Thread(target=one) for _ in range(n)]
@@ -216,7 +216,7 @@ def _free_port():
     """A port nothing is already listening on.
 
     A fixed port looks harmless and is not. A server left running from an
-    earlier session answers /healthz instantly, the spawn loop sees a healthy
+    earlier session answers /health instantly, the spawn loop sees a healthy
     service and proceeds, and the whole suite then tests the stale process --
     with whatever code and whatever credentials it happened to start with. That
     is not hypothetical: it is how a question with no cached vector got embedded
@@ -259,7 +259,7 @@ def _spawn():
         if p.poll() is not None:
             raise SystemExit(f"server exited immediately with code {p.returncode}")
         try:
-            if call(base, "/healthz", timeout=2)[0] == 200:
+            if call(base, "/health", timeout=2)[0] == 200:
                 return p, base
         except Exception:
             time.sleep(0.5)
@@ -326,7 +326,7 @@ def check_token_reload():
     try:
         for _ in range(60):
             try:
-                urllib.request.urlopen(base + "/healthz", timeout=1)
+                urllib.request.urlopen(base + "/health", timeout=1)
                 break
             except OSError:
                 time.sleep(0.25)
@@ -357,7 +357,7 @@ def check_drain(proc, base):
     import signal
     os.kill(proc.pid, signal.SIGTERM)
     time.sleep(0.5)
-    req = urllib.request.Request(base + "/healthz")
+    req = urllib.request.Request(base + "/health")
     try:
         urllib.request.urlopen(req, timeout=5)
         raise AssertionError("still reporting healthy after SIGTERM")

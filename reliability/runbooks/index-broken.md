@@ -19,7 +19,7 @@ The availability SLO cannot see this. Every request returned 200.
    should have stopped this, because every golden case that was answered would
    now fail. If it got through, find out how the gate was bypassed.
 
-3. **The corpus loaded short.** `curl <service>/healthz` reports `chunks`. Fewer
+3. **The corpus loaded short.** `curl <service>/health` reports `chunks`. Fewer
    than the number of documents means `docs/` did not make it into the image;
    the `.dockerignore` allowlist names it explicitly.
 

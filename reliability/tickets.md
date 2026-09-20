@@ -107,7 +107,7 @@ doesn't match its own passage is the tell.
 
 1. Error rate, latency and `KbIndexLooksBroken`: all normal. The outcome metric
    counts these as `answer`, so the index looks healthy to monitoring.
-2. `/healthz`: `{"ok": true, "chunks": 4}`. The index is built and the process is up.
+2. `/health`: `{"ok": true, "chunks": 4}`. The index is built and the process is up.
 3. Copy `vectors.json` out of a running pod (`kubectl cp`) and run the offline
    gate against it: `KB_VECTORS=./from-pod.json python eval/retrieval.py --gate`.
    It names every golden case that now comes
@@ -176,7 +176,7 @@ of something failing before the request reaches the application.
    perfect hour. **Believe that.** Then ask what the SLIs cannot see.
 2. The complaint is about *connecting*, not about a response. A request refused
    at the door is never counted, timed or logged by the process.
-3. Reproduce the shape: 200 connections at once to `/healthz`:
+3. Reproduce the shape: 200 connections at once to `/health`:
 
    ```
    200 simultaneous connections -> failures: 40

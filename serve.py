@@ -178,7 +178,7 @@ class Metrics:
     # Chosen around the SLO threshold (50ms) and the k6 budget (30ms), so both
     # can be read off exact bucket boundaries instead of interpolated.
     BUCKETS = (0.005, 0.01, 0.025, 0.03, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5)
-    ROUTES = ("/healthz", "/search", "/ask", "/metrics")
+    ROUTES = ("/health", "/healthz", "/search", "/ask", "/metrics")
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -394,7 +394,13 @@ class Handler(BaseHTTPRequestHandler):
     def _get(self):
         url = urlparse(self.path)
 
-        if url.path == "/healthz":
+        # Both names. /health is the one that works everywhere: Cloud Run's
+        # frontend answers the literal path /healthz with its own 404 before the
+        # request reaches the container -- a reserved path, and Google advises
+        # against paths ending in "z". The first deploy came up serving /search
+        # correctly while its health check 404ed. /healthz stays because Docker
+        # and Kubernetes conventionally point at it, and there it works.
+        if url.path in ("/health", "/healthz"):
             # Unauthenticated on purpose: a load balancer has no token, and this
             # says only that the process is up and the index is built.
             if DRAINING.is_set():

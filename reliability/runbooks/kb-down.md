@@ -9,7 +9,7 @@ running records no errors.
 1. **Is it down, or is monitoring down?** From anywhere outside the cluster:
 
    ```bash
-   curl -s -o /dev/null -w "%{http_code}\n" https://<service-url>/healthz
+   curl -s -o /dev/null -w "%{http_code}\n" https://<service-url>/health
    ```
 
    `200` means users are fine and the scrape path is broken: lower the urgency

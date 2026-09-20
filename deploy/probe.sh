@@ -24,7 +24,7 @@ test -n "$pod" || { echo "no Running pod to probe from"; exit 1; }
 
 kubectl exec "$pod" -- python -c "
 import json, urllib.request
-body = json.load(urllib.request.urlopen('http://kb/healthz', timeout=5))
+body = json.load(urllib.request.urlopen('http://kb/health', timeout=5))
 assert body.get('ok') and body.get('chunks', 0) > 0, body
 print('  service healthy from inside the cluster:', body)
 "

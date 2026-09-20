@@ -101,7 +101,7 @@ def probe(vectors_path):
                 last = [l for l in proc.stderr.read().strip().splitlines() if l.strip()]
                 return {"started": False, "why": last[-1][:90] if last else "?"}
             try:
-                urllib.request.urlopen(base + "/healthz", timeout=1)
+                urllib.request.urlopen(base + "/health", timeout=1)
                 healthy = True
                 break
             except urllib.error.HTTPError as e:

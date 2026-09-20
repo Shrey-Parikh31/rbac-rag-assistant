@@ -80,7 +80,7 @@ spec:
           # this pod receive traffic yet? The index takes a moment to build, and
           # a pod that receives a request before it is built serves an error.
           readinessProbe:
-            httpGet: { path: /healthz, port: 8080 }
+            httpGet: { path: /health, port: 8080 }
             initialDelaySeconds: 2
             periodSeconds: 3
             failureThreshold: 3
@@ -88,7 +88,7 @@ spec:
           # and more forgiving, because a liveness probe that is too eager
           # restarts a busy service and turns a slow afternoon into an outage.
           livenessProbe:
-            httpGet: { path: /healthz, port: 8080 }
+            httpGet: { path: /health, port: 8080 }
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3

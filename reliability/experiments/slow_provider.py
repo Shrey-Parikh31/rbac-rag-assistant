@@ -121,7 +121,7 @@ def main():
     try:
         for _ in range(40):
             try:
-                urllib.request.urlopen(base + "/healthz", timeout=1)
+                urllib.request.urlopen(base + "/health", timeout=1)
                 break
             except OSError:
                 time.sleep(0.25)

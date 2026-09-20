@@ -59,9 +59,15 @@ curl -H "Authorization: Bearer devstudent" "localhost:8080/search?q=how+late+can
 
 | Route | Auth | Needs a model |
 |---|---|---|
-| `GET /healthz` | no | no |
+| `GET /health` | no | no |
 | `GET /search?q=` | bearer token | no |
 | `POST /ask` | bearer token | yes, else `503` |
+
+`/healthz` answers identically, for Docker and Kubernetes where that name is the
+convention. It is unusable on Cloud Run: Google's frontend answers the literal
+path `/healthz` with its own 404 before the request reaches the container, which
+is how the first deploy came up serving `/search` correctly while its health
+check 404ed.
 
 ## The pipeline
 

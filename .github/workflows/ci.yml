@@ -146,7 +146,7 @@ jobs:
           docker run -d --name kb -p 8080:8080 \
             -e KB_TOKENS="$KB_TOKENS" "$IMAGE:${{ github.sha }}"
           for i in $(seq 1 40); do
-            if curl -sf localhost:8080/healthz; then echo; exit 0; fi
+            if curl -sf localhost:8080/health; then echo; exit 0; fi
             sleep 1
           done
           echo "container never became healthy"; docker logs kb; exit 1
@@ -209,7 +209,7 @@ jobs:
       - name: smoke test through the service
         run: |
           kubectl port-forward svc/kb 8080:80 > /dev/null 2>&1 &
-          for i in $(seq 1 30); do curl -sf localhost:8080/healthz >/dev/null && break; sleep 1; done
+          for i in $(seq 1 30); do curl -sf localhost:8080/health >/dev/null && break; sleep 1; done
           python3 test_serve.py http://localhost:8080
           kill %1
 
@@ -252,7 +252,7 @@ jobs:
           kubectl rollout undo deploy/kb
           kubectl rollout status deploy/kb --timeout=90s
           kubectl port-forward svc/kb 8080:80 > /dev/null 2>&1 &
-          for i in $(seq 1 30); do curl -sf localhost:8080/healthz >/dev/null && break; sleep 1; done
+          for i in $(seq 1 30); do curl -sf localhost:8080/health >/dev/null && break; sleep 1; done
           python3 test_serve.py http://localhost:8080
           kill %1
           echo "rolled back and serving correctly"

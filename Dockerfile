@@ -63,6 +63,6 @@ EXPOSE 8080
 # does. That only works if the orchestrator can tell healthy from merely running.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request,os,sys; \
-sys.exit(0 if urllib.request.urlopen(f\"http://127.0.0.1:{os.environ['PORT']}/healthz\", timeout=2).status == 200 else 1)"]
+sys.exit(0 if urllib.request.urlopen(f\"http://127.0.0.1:{os.environ['PORT']}/health\", timeout=2).status == 200 else 1)"]
 
 CMD ["python", "serve.py"]

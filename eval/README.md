@@ -326,7 +326,7 @@ down above as a step rather than remembered as a thing that was probably done.
 
 ### Instrument bug sixteen
 
-`test_serve.py` started a server on a fixed port and waited for `/healthz` to
+`test_serve.py` started a server on a fixed port and waited for `/health` to
 answer. A server left running from an earlier session answers instantly, so the
 spawn loop saw a healthy service and the whole suite tested **the stale process**
 — its code, and its credentials.

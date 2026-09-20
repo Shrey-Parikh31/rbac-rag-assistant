@@ -112,7 +112,7 @@ Three things to know before this goes in front of anyone:
    front and map a verified group claim to a role. What should not change is that
    the role is derived from something the caller cannot write for themselves.
 
-`GET /healthz` is unauthenticated and reports only that the process is up with
+`GET /health` is unauthenticated and reports only that the process is up with
 its index built, so point your load balancer at it. `GET /search` needs no model
 credentials at all; only `POST /ask` does, and without them it returns `503` with
 an explanation rather than failing.
