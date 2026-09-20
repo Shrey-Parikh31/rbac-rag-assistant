@@ -106,6 +106,23 @@ def check_metrics(base):
     assert answered > 0, "no search was classified as answered"
 
 
+def check_landing_page(base):
+    """A browser gets a page, and that page never carries a staff or admin token.
+
+    The demo token is injected from KB_DEMO_TOKEN and is public by design. Any
+    other token appearing in a page served to anonymous visitors would be a
+    clearance handed out to everyone who loads it.
+    """
+    with urllib.request.urlopen(base + "/", timeout=15) as r:
+        assert r.status == 200, r.status
+        assert r.headers.get("Content-Type", "").startswith("text/html")
+        page = r.read().decode()
+    assert "Ask a question" in page or "No demo token" in page, page[:200]
+    for role, token in TOKENS.items():
+        if role != "student":
+            assert token not in page, f"the {role} token is in a page anyone can load"
+
+
 def run(base):
     status, body = call(base, "/health")
     assert status == 200 and body["ok"], body
