@@ -355,12 +355,12 @@ jobs:
       # exactly that statement, and nothing long-lived is ever stored. A JSON
       # key in a repository secret is a password with no expiry date that
       # everyone forgets about until it appears in a log.
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ vars.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
 
       # Deployed with no traffic at all. The new revision exists, is reachable
       # on its own tagged URL, and is serving nobody.
@@ -369,14 +369,28 @@ jobs:
       # asks for: a rollback means production already served the bad version to
       # somebody. Here a broken revision is never in front of a user, so there
       # is nothing to roll back from.
+      # Except the very first time. Cloud Run refuses to create a service that
+      # serves nobody -- "--no-traffic not supported when creating a new
+      # service" -- so the first deploy goes live as it is created. That is
+      # acceptable for exactly the reason the candidate flow exists: on the
+      # first deploy there is no traffic to protect. Every deploy after it is
+      # tested before anyone is moved onto it.
       - name: deploy a candidate revision, no traffic
         run: |
+          if gcloud run services describe kb --region us-central1 --format='value(name)' >/dev/null 2>&1; then
+            echo "CANDIDATE=1" >> "$GITHUB_ENV"
+            EXTRA="--no-traffic --tag candidate"
+          else
+            echo "CANDIDATE=0" >> "$GITHUB_ENV"
+            EXTRA=""
+            echo "::notice title=First deploy::The service does not exist yet, so this revision is created live. The smoke test runs against the live URL. Later deploys are tested before receiving traffic."
+          fi
           gcloud run deploy kb \
             --image "$IMAGE:${{ github.sha }}" \
             --region us-central1 \
             --platform managed \
             --allow-unauthenticated \
-            --no-traffic --tag candidate \
+            $EXTRA \
             --min-instances 0 --max-instances 1 \
             --memory 512Mi --cpu 1 \
             --service-account "kb-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com" \
@@ -398,22 +412,33 @@ jobs:
         env:
           KB_TOKENS: ${{ secrets.KB_TOKENS_DEPLOYED }}
         run: |
-          url=$(gcloud run services describe kb --region us-central1 \
-                  --format='value(status.traffic.filter(tag:candidate).extract(url))' | tr -d '[]')
-          echo "candidate: $url"
+          if [ "$CANDIDATE" = "1" ]; then
+            url=$(gcloud run services describe kb --region us-central1 \
+                    --format='value(status.traffic.filter(tag:candidate).extract(url))' | tr -d '[]')
+            echo "candidate: $url"
+          else
+            url=$(gcloud run services describe kb --region us-central1 --format='value(status.url)')
+            echo "first deploy, live URL: $url"
+          fi
+          test -n "$url" || { echo "no URL to test"; exit 1; }
           python3 test_serve.py "$url"
 
       # Only now does anybody see it.
       - name: promote
         run: |
-          gcloud run services update-traffic kb --region us-central1 --to-latest --quiet
-          gcloud run services describe kb --region us-central1 --format='value(status.url)'
+          if [ "$CANDIDATE" = "1" ]; then
+            gcloud run services update-traffic kb --region us-central1 --to-latest --quiet
+          fi
+          url=$(gcloud run services describe kb --region us-central1 --format='value(status.url)')
+          echo "live: $url"
+          echo "### The assistant is live" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
 
       # The candidate failed its smoke test, so traffic was never moved. Clean
       # up the tag so the next run starts from a known state; production is
       # still serving the previous revision and never knew.
       - name: discard a candidate that failed
-        if: failure()
+        if: failure() && env.CANDIDATE == '1'
         run: |
           gcloud run services update-traffic kb --region us-central1 \
             --remove-tags candidate --quiet || true
