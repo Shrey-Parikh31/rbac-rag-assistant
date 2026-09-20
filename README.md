@@ -12,6 +12,31 @@ This is Layer 0 of a five-layer system. Layers above it add the delivery
 pipeline, reliability engineering, evaluation, security testing and
 observability, each on top of this application rather than beside it.
 
+## Try it
+
+<https://kb-zv5i45k6sq-uc.a.run.app>
+
+The student token is public on purpose, so anyone can see the access rules work.
+A student may read public material and is told when something exists that they
+are not cleared for; staff and administrator tokens are not published.
+
+```bash
+# a public policy: answered
+curl -H "Authorization: Bearer demo-student"   "https://kb-zv5i45k6sq-uc.a.run.app/search?q=how+late+can+I+enroll"
+
+# a confidential one: the existence is disclosed, the content is not
+curl -H "Authorization: Bearer demo-student"   "https://kb-zv5i45k6sq-uc.a.run.app/search?q=faculty+compensation+bands"
+
+# no token at all
+curl -i "https://kb-zv5i45k6sq-uc.a.run.app/search?q=anything"
+```
+
+It sleeps when nobody is using it, so the first request after a quiet spell
+takes a second to wake it. Generated answers (`POST /ask`) are switched off
+here: the key it holds is for looking up questions, and the free tier allows 20
+generations a day, which one visitor could spend. `deploy/GOOGLE_CLOUD_SETUP.md`
+is the whole setup, and the bill for this is $0.00.
+
 ## Run it
 
 Python 3.13. Note that `python` on this machine resolves to the msys2 build,
