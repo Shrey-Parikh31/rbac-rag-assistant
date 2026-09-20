@@ -144,6 +144,11 @@ gcloud iam service-accounts add-iam-policy-binding "$RUNTIME" --member="serviceA
 # GitHub could ask for this permission.
 exists gcloud iam workload-identity-pools describe github --location=global || \
   gcloud iam workload-identity-pools create github --location=global --display-name="GitHub"
+# These two are deliberately written as single lines. Cloud Shell mangled them
+# when they were split with backslashes: the pasted text overlapped itself and
+# Google received a truncated issuer URI, failing with "Invalid OIDC issuer URI"
+# after everything before it had succeeded. Long lines paste intact; continued
+# lines do not always.
 exists gcloud iam workload-identity-pools providers describe github \
   --location=global --workload-identity-pool=github || \
   gcloud iam workload-identity-pools providers create-oidc github \
