@@ -123,6 +123,29 @@ def check_landing_page(base):
             assert token not in page, f"the {role} token is in a page anyone can load"
 
 
+def check_corpus(base):
+    """The corpus view tells you what you may read, and only counts the rest.
+
+    Listing the titles of documents somebody is not cleared for would be the
+    disclosure ADR-12 forbids: "Faculty Compensation Bands" is a description of
+    a confidential document, not a neutral label.
+    """
+    status, student = call(base, "/corpus", role="student")
+    assert status == 200, student
+    assert student["role"] == "student"
+    titles = [d["title"] for d in student["readable"]]
+    assert titles, "a student can read nothing at all"
+    assert all(d["clearance"] == "public" for d in student["readable"]), student["readable"]
+    assert student["hidden"], "nothing is hidden from a student"
+    blob = json.dumps(student).lower()
+    for word in ("compensation", "salary", "incident"):
+        assert word not in blob, f"a restricted document's subject ({word}) leaked to a student"
+
+    status, staff = call(base, "/corpus", role="staff")
+    assert len(staff["readable"]) > len(student["readable"]), "staff sees no more than a student"
+    assert call(base, "/corpus")[0] == 401, "the corpus view is readable without a token"
+
+
 def run(base):
     status, body = call(base, "/health")
     assert status == 200 and body["ok"], body

@@ -193,10 +193,28 @@ def describe(result):
     if result == tools.NO_MATCH:
         return "no_match", [], result
     if result.startswith(tools.RESTRICTED_PREFIX):
-        return "restricted", [], result
+        # The tool's wording is addressed to the model -- "Tell the user that
+        # guidance on this exists" -- which is the right thing to hand a model
+        # and the wrong thing to show a person. Same disclosure, said to whoever
+        # asked: the clearance level and nothing about the subject.
+        level = re.search(r"classified '(\w+)'", result)
+        said = (f"Something matching your question exists, classified "
+                f"'{level.group(1)}'." if level else
+                "Something matching your question exists above your clearance.")
+        return "restricted", [], (
+            said + " You are not cleared to read it, and this service will not "
+            "describe it -- not its contents, not its subject, not which office "
+            "owns it. Ask that office directly if you believe you should have "
+            "access.")
     sources = [{"source": m.group(1), "score": float(m.group(2))}
                for m in _HIT.finditer(result)]
-    return "answer", sources, _HIT.sub("", result).strip()
+    # Unwrap for display only. The documents are hard-wrapped at about 78
+    # columns, and rendering those line breaks in a browser breaks sentences
+    # mid-line at whatever width the reader happens to have. Blank lines stay:
+    # they are paragraphs. `result` keeps the original wrapping.
+    passage = _HIT.sub("", result).strip()
+    passage = re.sub(r"(?<!\n)\n(?!\n)", " ", passage)
+    return "answer", sources, passage
 
 
 class Metrics:
@@ -216,7 +234,7 @@ class Metrics:
     # Chosen around the SLO threshold (50ms) and the k6 budget (30ms), so both
     # can be read off exact bucket boundaries instead of interpolated.
     BUCKETS = (0.005, 0.01, 0.025, 0.03, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5)
-    ROUTES = ("/", "/health", "/healthz", "/search", "/ask", "/metrics")
+    ROUTES = ("/", "/health", "/healthz", "/search", "/corpus", "/ask", "/metrics")
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -478,6 +496,26 @@ class Handler(BaseHTTPRequestHandler):
         role = self._role()
         if role is None:
             return self._send(401, {"error": "bearer token required"})
+
+        if url.path == "/corpus":
+            # What this role may read, and how much exists that it may not.
+            #
+            # Titles only for documents the caller is cleared for. For the rest,
+            # a count per clearance level and nothing else: ADR-12 says naming
+            # the subject of a document somebody was refused is describing it,
+            # and "Faculty Compensation Bands" is a description.
+            readable, hidden = [], {}
+            seen = set()
+            for c in index().chunks:
+                if c["role"] in rag.CLEARANCE.get(role, {"public"}):
+                    if c["source"] not in seen:
+                        seen.add(c["source"])
+                        readable.append({"source": c["source"], "title": c["title"],
+                                         "clearance": c["role"]})
+                elif c["source"] not in seen:
+                    seen.add(c["source"])
+                    hidden[c["role"]] = hidden.get(c["role"], 0) + 1
+            return self._send(200, {"role": role, "readable": readable, "hidden": hidden})
 
         if url.path == "/search":
             q = (parse_qs(url.query).get("q") or [""])[0].strip()
