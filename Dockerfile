@@ -44,7 +44,7 @@ RUN apt-get update \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY rag.py tools.py agent.py serve.py ./
+COPY rag.py tools.py agent.py serve.py ui.html ./
 COPY docs/ docs/
 # Embeddings for the corpus, computed once and committed. Without this the
 # container would need an API key at startup just to build its index, which

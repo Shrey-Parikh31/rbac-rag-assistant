@@ -22,6 +22,7 @@ is what will say when that stops being true, and gunicorn is the upgrade.
 """
 import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -167,71 +168,35 @@ TOKENS = Tokens()
 # required"}, which is correct -- a browser cannot attach an Authorization
 # header -- and reads as broken.
 #
-# The demo token is injected from KB_DEMO_TOKEN and nothing else. Unset, which
-# is every deployment except the public demo, the page still explains the
-# service and simply has no search box: a page that helpfully published
-# whichever student token a real deployment used would hand out a clearance to
-# anyone who loaded it. Staff and administrator tokens are never here.
+# The markup lives in ui.html rather than in a string here: it is HTML, and HTML
+# embedded in Python is edited by nobody. KB_DEMO_TOKEN is the only value
+# substituted into it. Unset, which is every deployment except the public demo,
+# the field is simply empty -- a page that published whichever student token a
+# real deployment used would hand a clearance to everyone who loaded it.
 DEMO_TOKEN = os.environ.get("KB_DEMO_TOKEN", "")
-
-PAGE = """<!doctype html>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Role-aware knowledge assistant</title>
-<style>
- body{font:16px/1.55 system-ui,sans-serif;max-width:44rem;margin:2rem auto;padding:0 1rem;color:#111}
- h1{font-size:1.4rem;margin-bottom:.2rem} p.sub{color:#555;margin-top:0}
- form{display:flex;gap:.5rem;margin:1.2rem 0} input{flex:1;padding:.6rem;font-size:1rem}
- button{padding:.6rem 1rem;font-size:1rem;cursor:pointer}
- pre{background:#f4f4f5;padding:1rem;border-radius:6px;white-space:pre-wrap;word-break:break-word}
- .ex{background:none;padding:0;color:#0645ad;cursor:pointer;border:0;font:inherit;text-decoration:underline}
- footer{color:#555;font-size:.9rem;margin-top:2rem}
- @media(prefers-color-scheme:dark){body{background:#111;color:#eee}pre{background:#1c1c1e}
-  input,button{background:#1c1c1e;color:#eee;border:1px solid #333}.ex{color:#8ab4f8}}
-</style>
-<h1>Role-aware knowledge assistant</h1>
-<p class="sub">Answers come from university policy documents, and you only see what
-your role is cleared to read. You are asking as a <strong>student</strong>.</p>
-__BOX__
-<p>Try: <button class="ex">how late can I enroll</button> &middot;
-<button class="ex">what happens if my GPA drops</button> &middot;
-<button class="ex">faculty compensation bands</button> (confidential: a student is
-told it exists, not what it says)</p>
-<pre id="out">Ask something.</pre>
-<footer>Retrieval only; generated answers are switched off on this demo.
-Source, tests and postmortems:
-<a href="https://github.com/Shrey-Parikh31/rbac-rag-assistant">github.com/Shrey-Parikh31/rbac-rag-assistant</a></footer>
-<script>
-const out = document.getElementById("out"), form = document.querySelector("form");
-const TOKEN = "__TOKEN__";
-async function ask(q){
-  if(!q) return;
-  out.textContent = "searching...";
-  try{
-    const r = await fetch("/search?q=" + encodeURIComponent(q), {headers:{Authorization:"Bearer " + TOKEN}});
-    const b = await r.json();
-    // textContent, never innerHTML: what comes back is document text, and a
-    // page that renders retrieved content as markup is one stored script away
-    // from running it.
-    out.textContent = r.status === 200 ? b.result : (b.error || ("HTTP " + r.status));
-  }catch(e){ out.textContent = "could not reach the service: " + e; }
-}
-if(form) form.addEventListener("submit", e => { e.preventDefault(); ask(form.q.value); });
-document.querySelectorAll(".ex").forEach(b => b.addEventListener("click", () => {
-  if(form) form.q.value = b.textContent; ask(b.textContent);
-}));
-</script>
-"""
-
-NO_BOX = ("<p><em>No demo token is configured on this deployment, so there is no "
-          "search box. Callers send <code>Authorization: Bearer &lt;their token&gt;</code> "
-          "to <code>/search?q=...</code>.</em></p>")
-BOX = ('<form><input name="q" placeholder="Ask a question" autofocus '
-       'autocomplete="off"><button>Search</button></form>')
+UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.html")
 
 
 def landing():
-    return (PAGE.replace("__BOX__", BOX if DEMO_TOKEN else NO_BOX)
-                .replace("__TOKEN__", DEMO_TOKEN)).encode()
+    with open(UI, encoding="utf-8") as f:
+        return f.read().replace("__TOKEN__", DEMO_TOKEN).encode()
+
+
+# Pulled out of the text search_docs returns, so the page can show which
+# document answered and how well it matched without parsing prose in the
+# browser. The tool's output is unchanged: this reads it, it does not replace it.
+_HIT = re.compile(r"^\[([^\]\s]+) score=([0-9.]+)\]$", re.M)
+
+
+def describe(result):
+    """(outcome, sources, passage) for a search result string."""
+    if result == tools.NO_MATCH:
+        return "no_match", [], result
+    if result.startswith(tools.RESTRICTED_PREFIX):
+        return "restricted", [], result
+    sources = [{"source": m.group(1), "score": float(m.group(2))}
+               for m in _HIT.finditer(result)]
+    return "answer", sources, _HIT.sub("", result).strip()
 
 
 class Metrics:
@@ -536,10 +501,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(503, {"error": "this question is new and cannot be "
                                                  "looked up right now; try again shortly"},
                                   {"Retry-After": "30"})
-            METRICS.outcome("no_match" if result == tools.NO_MATCH else
-                            "restricted" if result.startswith(tools.RESTRICTED_PREFIX)
-                            else "answer")
+            outcome, sources, passage = describe(result)
+            METRICS.outcome(outcome)
+            # `result` is unchanged: it is what a model is shown, and
+            # eval/retrieval.py classifies on it. The rest is for the page.
             return self._send(200, {"role": role, "result": result,
+                                    "outcome": outcome, "sources": sources,
+                                    "passage": passage,
                                     "took_s": round(time.monotonic() - started, 3)})
 
         return self._send(404, {"error": "not found"})

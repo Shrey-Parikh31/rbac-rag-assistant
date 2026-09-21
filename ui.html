@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Role-aware knowledge assistant</title>
+<!--
+  The demo page. One file, no framework, no build step: it is served by the same
+  container as the API, so there is nothing extra to deploy, break or pay for.
+
+  __TOKEN__ is replaced at startup with KB_DEMO_TOKEN and nothing else. On a
+  deployment that does not set it the field is simply empty: a page that
+  published whichever student token a real deployment used would hand a
+  clearance to everyone who loaded it.
+
+  Every value that comes back from the API is written with textContent. It is
+  document text, and a page that renders retrieved content as markup is one
+  stored script away from running it.
+-->
+<style>
+  :root {
+    --bg: #fbfbfd; --fg: #16161a; --muted: #6b6b76; --line: #e3e3e8;
+    --card: #fff; --accent: #2d5bd7; --ok: #1c7a4a; --warn: #9a5b00; --none: #6b6b76;
+    --chip: #f1f1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101014; --fg: #ececf1; --muted: #9a9aa5; --line: #2a2a33;
+      --card: #17171d; --accent: #7fa4ff; --ok: #57c78d; --warn: #e0a24a; --none: #9a9aa5;
+      --chip: #22222b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 50rem; margin: 0 auto; padding: 2rem 1rem 4rem; }
+  header h1 { font-size: 1.5rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--muted); }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1rem; margin-top: 1.25rem;
+  }
+  label { display: block; font-size: .8rem; text-transform: uppercase;
+          letter-spacing: .06em; color: var(--muted); margin-bottom: .35rem; }
+  .row { display: flex; gap: .5rem; flex-wrap: wrap; }
+  input {
+    flex: 1 1 14rem; min-width: 0; padding: .65rem .75rem; font: inherit;
+    color: var(--fg); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  input:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  button {
+    padding: .65rem 1rem; font: inherit; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--chip); color: var(--fg);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .6; cursor: progress; }
+  .examples { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .75rem; }
+  .examples button { font-size: .9rem; padding: .35rem .6rem; border-radius: 999px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem;
+    padding: .2rem .6rem; border-radius: 999px; background: var(--chip); color: var(--muted);
+  }
+  .dot { width: .55rem; height: .55rem; border-radius: 50%; background: currentColor; }
+  .answer  { color: var(--ok); }
+  .restricted { color: var(--warn); }
+  .no_match, .error { color: var(--none); }
+  .meta { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center;
+          margin-bottom: .6rem; }
+  pre#passage {
+    margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: inherit;
+  }
+  .why { margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--line);
+         color: var(--muted); font-size: .92rem; }
+  footer { margin-top: 2rem; color: var(--muted); font-size: .9rem; }
+  a { color: var(--accent); }
+  .hint { color: var(--muted); font-size: .85rem; margin: .4rem 0 0; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Role-aware knowledge assistant</h1>
+    <p>Answers come from university policy documents, and you are only shown what
+       your role is cleared to read.</p>
+  </header>
+
+  <div class="card">
+    <label for="token">Access token</label>
+    <div class="row">
+      <input id="token" value="__TOKEN__" autocomplete="off" spellcheck="false"
+             placeholder="paste a token">
+      <span class="badge" id="who"><span class="dot"></span><span id="who-text">not checked</span></span>
+    </div>
+    <p class="hint">The student token is published so anyone can try this. Staff
+       and administrator tokens are not: paste one if you have it, and the same
+       question returns more.</p>
+  </div>
+
+  <form class="card" id="ask">
+    <label for="q">Question</label>
+    <div class="row">
+      <input id="q" name="q" placeholder="Ask about enrolment, grades, incidents, pay…"
+             autocomplete="off" autofocus>
+      <button class="primary" id="go">Search</button>
+    </div>
+    <div class="examples" id="examples">
+      <button type="button" data-q="How late can I enroll in a course?">a public policy</button>
+      <button type="button" data-q="What are the faculty compensation bands?">something confidential</button>
+      <button type="button" data-q="How long do I have to report a suspected compromise?">staff-only guidance</button>
+      <button type="button" data-q="What are the library opening hours?">something it does not have</button>
+    </div>
+  </form>
+
+  <div class="card">
+    <div class="meta">
+      <span class="badge" id="outcome"><span class="dot"></span><span id="outcome-text">ask something</span></span>
+      <span class="badge" id="source" hidden></span>
+      <span class="badge" id="timing" hidden></span>
+    </div>
+    <pre id="passage" aria-live="polite">The answer appears here.</pre>
+    <div class="why" id="why">Three things can happen: you are shown the passage,
+      you are told that material exists which your role may not read, or nothing
+      in the corpus covers the question. The third is not a failure — refusing to
+      invent an answer is the point.</div>
+  </div>
+
+  <footer>
+    Retrieval only; generated answers are switched off on this demo, because the
+    free tier allows 20 a day and one visitor could spend them. It sleeps when
+    nobody is using it, so the first question after a quiet spell takes a moment.
+    <a href="https://github.com/Shrey-Parikh31/rbac-rag-assistant">Source, tests,
+    and the postmortems from breaking it on purpose</a>.
+  </footer>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const WHY = {
+    answer: "Answered: a passage your role may read scored above the similarity floor. " +
+            "The score is cosine similarity; anything under 0.61 is treated as no match.",
+    restricted: "Refused: something matching your question exists at a clearance above " +
+                "yours. You are told it exists and nothing about what it says — not even " +
+                "which office owns it, because naming the owner describes the document.",
+    no_match: "Nothing found: no document covers this at any clearance level. The system " +
+              "says so instead of inventing an answer, which is the behaviour the " +
+              "evaluation set exists to keep honest.",
+    error: "The service answered with an error. Status and message are above."
+  };
+
+  function setBadge(el, textEl, cls, text) {
+    el.className = "badge " + cls;
+    textEl.textContent = text;
+  }
+
+  async function search(q) {
+    const token = $("token").value.trim();
+    if (!q) return;
+    $("go").disabled = true;
+    $("passage").textContent = "searching…";
+    setBadge($("outcome"), $("outcome-text"), "", "working");
+    $("source").hidden = $("timing").hidden = true;
+    try {
+      const r = await fetch("/search?q=" + encodeURIComponent(q),
+                            { headers: { Authorization: "Bearer " + token } });
+      const b = await r.json();
+      if (r.status !== 200) {
+        setBadge($("outcome"), $("outcome-text"), "error", "HTTP " + r.status);
+        setBadge($("who"), $("who-text"), "error", r.status === 401 ? "token not accepted" : "unknown");
+        $("passage").textContent = b.error || "no detail";
+        $("why").textContent = WHY.error;
+        return;
+      }
+      setBadge($("who"), $("who-text"), "answer", "you are " + b.role);
+      const kind = b.outcome || "answer";
+      setBadge($("outcome"), $("outcome-text"), kind,
+               { answer: "answered", restricted: "exists, not cleared",
+                 no_match: "nothing found" }[kind] || kind);
+      if (b.sources && b.sources.length) {
+        $("source").textContent = b.sources[0].source + "  ·  score " + b.sources[0].score;
+        $("source").hidden = false;
+      }
+      $("timing").textContent = (b.took_s * 1000).toFixed(0) + " ms";
+      $("timing").hidden = false;
+      $("passage").textContent = b.passage || b.result;
+      $("why").textContent = WHY[kind] || "";
+    } catch (e) {
+      setBadge($("outcome"), $("outcome-text"), "error", "unreachable");
+      $("passage").textContent = "Could not reach the service: " + e;
+    } finally {
+      $("go").disabled = false;
+    }
+  }
+
+  $("ask").addEventListener("submit", (e) => { e.preventDefault(); search($("q").value); });
+  $("examples").addEventListener("click", (e) => {
+    const q = e.target.dataset.q;
+    if (q) { $("q").value = q; search(q); }
+  });
+</script>
+</html>
