@@ -3,3 +3,6 @@ __pycache__/
 tickets.jsonl
 .env
 eval/runs/
+
+# Personal study notes, deliberately not published.
+STUDY-GUIDE.md
