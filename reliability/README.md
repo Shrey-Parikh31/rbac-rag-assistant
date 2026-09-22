@@ -23,7 +23,11 @@ controls end to end.
 
 ### What the SLIs cannot see
 
-Being clear about the blind spots is most of the work:
+Being clear about the blind spots is most of the work. Three of the five below
+come from the same root cause, measuring at the server, and that is what
+[`observability/`](../observability/) exists to answer: a second source that
+asks from a machine outside the deployment, and therefore counts the requests
+the server never received.
 
 - **A dead process.** It records no requests and so no errors. The error ratio
   is undefined rather than high, and a burn-rate alert on it never fires.
@@ -40,6 +44,10 @@ Being clear about the blind spots is most of the work:
   burst of 200 connections lost 40 before the process saw them: not counted, not
   timed, not logged. Measuring at the server means measuring only the requests
   that got in. See postmortem 003.
+- **A correct answer given to the wrong person.** 200, fast, counted as a
+  success, and the only failure in this repository that matters more than an
+  outage. `KbAccessControlFailing` is the one alert that pages on a single
+  failed sample, because there is no acceptable rate for it.
 
 ## Alerts
 
@@ -54,6 +62,15 @@ push.
 | `KbAvailabilityBurn` | page / ticket | [availability-burn.md](runbooks/availability-burn.md) |
 | `KbLatencyBurn` | page / ticket | [latency-burn.md](runbooks/latency-burn.md) |
 | `KbIndexLooksBroken` | ticket | [index-broken.md](runbooks/index-broken.md) |
+| `KbAccessControlFailing` | page | [access-control-failing.md](runbooks/access-control-failing.md) |
+| `KbUnreachableFromOutside` | page | [kb-down.md](runbooks/kb-down.md) |
+| `KbBreakerOpen` | ticket | [breaker-open.md](runbooks/breaker-open.md) |
+| `KbRotationIncomplete` | ticket | [rotation-incomplete.md](runbooks/rotation-incomplete.md) |
+| `KbPodImbalance` | ticket | [pod-imbalance.md](runbooks/pod-imbalance.md) |
+
+The last five read the signals added in Layer 5: the external probe, and two
+gauges for state that used to exist only as a log line on one pod. Each of them
+closes an action item an experiment left open.
 
 **What the tests prove**, each as a case that fails if it stops being true:
 
@@ -65,6 +82,16 @@ push.
 - a dead service pages even though it never recorded a single error
 - an index returning "no match" to 90% of searches is noticed, but only with
   enough traffic that it is not three unlucky questions at 4am
+- one failed access-control probe pages **immediately**, and keeps paging for
+  ten minutes after it stops, because the disclosure still happened
+- one failed health probe does **not** page: on a platform that scales to zero
+  that is a cold start, and an alert that fires on those gets muted within a week
+- one pod taking 100% of traffic files a ticket, while `KbAvailabilityBurn` and
+  `KbDown` stay silent in the same test, which is the point of it existing
+- a rotation that converges across pods in under a minute files nothing; one pod
+  that never converges files a ticket
+- a breaker that opens and closes inside a minute files nothing; one stuck open
+  for five files a ticket
 
 **The tests have been seen to fail.** Making the fast-burn threshold ten times
 too sensitive on a throwaway branch failed the blip test, and the image was not

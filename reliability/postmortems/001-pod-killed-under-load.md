@@ -147,4 +147,20 @@ the regression would have shipped with a green build.
 | Experiment runs 75s, past the grace period | done |
 | Experiment fails the build on a single failed request | done |
 | Per-pod request counts printed after every run | done |
-| Alert on per-pod imbalance under load | **open**: needs Prometheus in the cluster, which is Layer 5 |
+| Alert on per-pod imbalance under load | done: `KbPodImbalance`, with run 4's numbers as its promtool test |
+
+## Closed in Layer 5
+
+The alert that run 4 needed now exists. Its test is this postmortem: one pod
+serving 800 requests a second while its replacement serves none, asserted to
+file a ticket, **and asserted not to fire `KbAvailabilityBurn` or `KbDown`**,
+because the whole difficulty was that a 100% success rate is not a healthy
+service.
+
+Two guards were needed to make it usable. A traffic floor, because the ratio is
+noise at low volume, and a pod count above one, because on Cloud Run the single
+instance takes 100% of traffic correctly and would otherwise page every night.
+
+The per-pod counters this depended on are also a panel now, in
+`observability/dashboards/service.json`. Run 4 was answered by reading two
+numbers out of a log; the same question is a graph.

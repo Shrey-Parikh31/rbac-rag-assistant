@@ -150,3 +150,177 @@ tests:
         values: '0+1x60'
     alert_rule_test:
       - { eval_time: 30m, alertname: KbIndexLooksBroken, exp_alerts: [] }
+  # --------------------------------------------------- seen from outside
+  - name: a probe that catches a leak pages immediately
+    interval: 1m
+    input_series:
+      - series: 'kb_probe_up{check="search_refused",origin="github-actions"}'
+        values: '1 1 1 0 1 1 1 1 1 1 1 1 1 1 1'
+      - series: 'kb_probe_up{check="unauthenticated",origin="github-actions"}'
+        values: '1+0x15'
+      - series: 'kb_probe_up{check="corpus",origin="github-actions"}'
+        values: '1+0x15'
+    alert_rule_test:
+      # One failed probe is enough. There is no threshold at which showing a
+      # student a restricted document is acceptable, so there is no window to
+      # wait out and no `for` to satisfy.
+      - eval_time: 4m
+        alertname: KbAccessControlFailing
+        exp_alerts:
+          - exp_labels: { severity: page, check: search_refused, origin: github-actions }
+            exp_annotations:
+              summary: A probe that checks access control failed; restricted material may be reachable.
+              runbook: reliability/runbooks/access-control-failing.md
+      # And it keeps paging for ten minutes after the leak stops, because the
+      # material was still disclosed. Silence at t+5 would let a leak that
+      # self-corrected go unexamined.
+      - eval_time: 10m
+        alertname: KbAccessControlFailing
+        exp_alerts:
+          - exp_labels: { severity: page, check: search_refused, origin: github-actions }
+            exp_annotations:
+              summary: A probe that checks access control failed; restricted material may be reachable.
+              runbook: reliability/runbooks/access-control-failing.md
+
+  - name: access control holding pages nobody
+    interval: 1m
+    input_series:
+      - series: 'kb_probe_up{check="search_refused"}'
+        values: '1+0x30'
+      - series: 'kb_probe_up{check="unauthenticated"}'
+        values: '1+0x30'
+      - series: 'kb_probe_up{check="corpus"}'
+        values: '1+0x30'
+    alert_rule_test:
+      - { eval_time: 30m, alertname: KbAccessControlFailing, exp_alerts: [] }
+
+  # A single failed health probe is a blip on a scale-to-zero platform: one
+  # cold start that took longer than the timeout. Ten minutes of nothing is an
+  # outage. The alert has to tell those apart, or it pages on cold starts.
+  - name: one failed health probe is not an outage
+    interval: 1m
+    input_series:
+      - series: 'kb_probe_up{check="health"}'
+        values: '1 1 1 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - { eval_time: 5m,  alertname: KbUnreachableFromOutside, exp_alerts: [] }
+      - { eval_time: 20m, alertname: KbUnreachableFromOutside, exp_alerts: [] }
+
+  - name: a service unreachable from outside for ten minutes pages
+    interval: 1m
+    input_series:
+      - series: 'kb_probe_up{check="health"}'
+        values: '1 1 1 1 1 0+0x25'
+    alert_rule_test:
+      - { eval_time: 10m, alertname: KbUnreachableFromOutside, exp_alerts: [] }
+      - eval_time: 22m
+        alertname: KbUnreachableFromOutside
+        exp_alerts:
+          - exp_labels: { severity: page, check: health }
+            exp_annotations:
+              summary: The service has not answered an external probe for ten minutes.
+              runbook: reliability/runbooks/kb-down.md
+
+  # ---------------------------------------------------------------- state
+  # The breaker opening and closing inside a minute is it working: three slow
+  # failures, a cooldown, a successful probe. Ticketing that would file one
+  # every time a provider hiccuped.
+  - name: a breaker that opens and recovers files nothing
+    interval: 1m
+    input_series:
+      - series: 'kb_breaker_state'
+        values: '0 0 1 2 0 0 0 0 0 0 0 0'
+    alert_rule_test:
+      - { eval_time: 11m, alertname: KbBreakerOpen, exp_alerts: [] }
+
+  - name: a breaker stuck open files a ticket
+    interval: 1m
+    input_series:
+      - series: 'kb_breaker_state'
+        values: '0 0 1 1 1 2 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - { eval_time: 5m, alertname: KbBreakerOpen, exp_alerts: [] }
+      - eval_time: 17m
+        alertname: KbBreakerOpen
+        exp_alerts:
+          - exp_labels: { severity: ticket }
+            exp_annotations:
+              summary: The model provider has been failing long enough that /ask is refusing calls.
+              runbook: reliability/runbooks/breaker-open.md
+
+  # Two pods, one rotating at t+2 and the other at t+3. That is the normal,
+  # measured case: the kubelet rewrites each mounted Secret on its own
+  # schedule, and postmortem 004 measured 53 seconds between the first pod and
+  # the last. A ticket for that would fire on every successful rotation.
+  - name: a rotation that completes files nothing
+    interval: 1m
+    input_series:
+      - series: 'kb_tokens_version{pod="kb-a"}'
+        values: '111 111 222 222 222 222 222 222 222 222 222 222 222 222 222'
+      - series: 'kb_tokens_version{pod="kb-b"}'
+        values: '111 111 111 222 222 222 222 222 222 222 222 222 222 222 222'
+    alert_rule_test:
+      - { eval_time: 14m, alertname: KbRotationIncomplete, exp_alerts: [] }
+
+  # One pod never picks up the new map. This is exactly postmortem 004's
+  # original failure, where the token map came from the environment and no
+  # running process could see the Secret change. The leaked token still works
+  # on that pod, and the only symptom is a legitimate user getting intermittent
+  # 401s, which is also what a working rotation looks like from their side.
+  - name: a rotation one pod never picks up files a ticket
+    interval: 1m
+    input_series:
+      - series: 'kb_tokens_version{pod="kb-a"}'
+        values: '111 111 222+0x20'
+      - series: 'kb_tokens_version{pod="kb-stuck"}'
+        values: '111+0x22'
+    alert_rule_test:
+      - { eval_time: 5m, alertname: KbRotationIncomplete, exp_alerts: [] }
+      - eval_time: 20m
+        alertname: KbRotationIncomplete
+        exp_alerts:
+          - exp_labels: { severity: ticket }
+            exp_annotations:
+              summary: Processes disagree about the token map; a revocation has not taken effect everywhere.
+              runbook: reliability/runbooks/rotation-incomplete.md
+
+  # Postmortem 001, run 4, as a rule. Every request succeeds throughout, so
+  # this is the only test in this file whose incident has a 100% success rate.
+  - name: one pod serving everything while its replacement is idle
+    interval: 1m
+    input_series:
+      - series: 'kb_requests_total{route="/search",code="200",pod="kb-survivor"}'
+        values: '0+800x30'
+      - series: 'kb_requests_total{route="/search",code="200",pod="kb-replacement"}'
+        values: '0+0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KbPodImbalance
+        exp_alerts:
+          - exp_labels: { severity: ticket }
+            exp_annotations:
+              summary: One pod is taking nearly all the traffic while another sits idle.
+              runbook: reliability/runbooks/pod-imbalance.md
+      # And nothing else notices, which is the reason this alert exists.
+      - { eval_time: 20m, alertname: KbAvailabilityBurn, exp_alerts: [] }
+      - { eval_time: 20m, alertname: KbDown,             exp_alerts: [] }
+
+  - name: evenly loaded pods file nothing
+    interval: 1m
+    input_series:
+      - series: 'kb_requests_total{route="/search",code="200",pod="kb-a"}'
+        values: '0+400x30'
+      - series: 'kb_requests_total{route="/search",code="200",pod="kb-b"}'
+        values: '0+390x30'
+    alert_rule_test:
+      - { eval_time: 20m, alertname: KbPodImbalance, exp_alerts: [] }
+
+  # One instance is not an imbalance, it is Cloud Run. Without the pod-count
+  # guard this ratio is 1.0 and correct, and would page every night.
+  - name: a single instance is not an imbalance
+    interval: 1m
+    input_series:
+      - series: 'kb_requests_total{route="/search",code="200",pod="kb-only"}'
+        values: '0+800x30'
+    alert_rule_test:
+      - { eval_time: 20m, alertname: KbPodImbalance, exp_alerts: [] }

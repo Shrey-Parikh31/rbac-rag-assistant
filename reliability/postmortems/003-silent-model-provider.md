@@ -127,5 +127,23 @@ measuring at the server means measuring only the requests that got in.
 | Bulkhead: 8 concurrent `/ask` | done |
 | Experiment runs in CI and fails on regression | done |
 | Listen backlog 5 → `SOMAXCONN`; a 200-connection burst test | done |
-| Breaker state as a metric and an alert, so an open breaker is visible without reading logs | **open**: belongs with Layer 5 |
-| A client-side probe measuring availability from outside, since the server cannot count what never reaches it | **open**: belongs with Layer 5 |
+| Breaker state as a metric and an alert, so an open breaker is visible without reading logs | done: `kb_breaker_state`, `KbBreakerOpen` |
+| A client-side probe measuring availability from outside, since the server cannot count what never reaches it | done: `observability/probe.py`, every 15 minutes |
+
+## Closed in Layer 5
+
+**The breaker is a gauge now** (`kb_breaker_state`, 0 closed, 1 open, 2 probing)
+with a state-timeline panel and a ticket after five unbroken minutes open. The
+alert deliberately does not fire on a breaker that opens and closes inside a
+minute: that is the cooldown working, and ticketing it would file one every time
+a provider hiccuped. A ticket rather than a page, because `/search` never calls
+the provider and stays up throughout.
+
+**The probe exists and runs from GitHub Actions**, which matters mostly for
+where it is not: a monitor running inside the deployment goes down with it and
+then reports nothing, which reads exactly like everything being fine.
+
+The finding at the bottom of this postmortem, the one caller in five refused
+before the process saw them, is the reason the probe counts responses rather
+than errors. Its `connection`, `timeout` and `tls` outcomes are three different
+stories that a server-side error ratio records identically, as nothing at all.

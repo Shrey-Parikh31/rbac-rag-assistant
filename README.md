@@ -104,6 +104,9 @@ things make it a gate rather than a report:
 | `eval/retrieval.py --gate` | a golden case that used to pass stops passing, or anything leaks |
 | `perf/latency.js` (k6) | p95 on `/search` exceeds 30ms, or the error rate exceeds 1% |
 | Trivy | a critical CVE with an available fix is in the image |
+| `promtool test rules` | an alert stops firing, stops clearing, or starts firing on a blip |
+| `observability/check_dashboards.py` | a dashboard panel asks for a metric nothing emits |
+| `observability/test_probe.py` | the external probe stops noticing a leak, a wrong document or an empty index |
 
 **Both scanners caught something real on their first run.** Trivy refused to
 publish over three criticals in `perl-base`: a heap overflow compiling regular
@@ -182,6 +185,40 @@ run is `.github/workflows/eval.yml`, started by hand.
 .\.venv\Scripts\python.exe eval\retrieval.py --accept   # deliberately move the bar
 .\.venv\Scripts\python.exe test_serve.py                # end to end over HTTP
 ```
+
+## Watching it
+
+Four chaos experiments found five failures. **Four of them returned HTTP 200.**
+A pod serving nothing beside one at its CPU limit, an index answering
+confidently out of the wrong file, a revoked token still working, a connection
+refused before the process existed: every one of them had a perfect error ratio
+while it was happening.
+
+So the monitoring has two sources rather than one, and the split is the
+interesting part.
+
+| | Fed by | Good for | Blind to |
+|---|---|---|---|
+| `dashboards/service.json` | Prometheus scraping `/metrics` | latency percentiles, outcome mix, breaker state, per-pod load | anything that never reached the process |
+| `dashboards/slo.json` | `observability/probe.py`, from GitHub Actions every 15 minutes | availability and latency as a user experiences them, cold starts, access control | anything happening between two probes |
+
+**The objective is measured from outside.** Cloud Run scales to zero here, so a
+scrape after a quiet period finds a process that has just started with its
+counters at zero, and `rate()` over that is a restart detector rather than a
+traffic figure. Keeping an instance pinned up to fix that costs real money every
+month for a service that is idle most of the day. Measuring from outside is
+cheaper and also more honest: it counts the seven seconds a user waited for a
+container to boot, which the server's own histogram never sees.
+
+**Three of the probe's five checks are about access control, not uptime**, and
+they can all fail while availability is 100%. `KbAccessControlFailing` is the
+only alert here that pages on a single failed sample, because there is no rate
+of showing a student a confidential document that would be acceptable.
+
+It costs nothing to run: every question the probe asks is already in the vector
+cache, so no check reaches the embedding provider.
+
+Details in [`observability/`](observability/).
 
 ## How it fits together
 

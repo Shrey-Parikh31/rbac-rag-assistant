@@ -159,3 +159,96 @@ groups:
         annotations:
           summary: Most searches are finding nothing, while returning success.
           runbook: reliability/runbooks/index-broken.md
+      # ------------------------------------------------- seen from outside
+      # Everything above is the server's opinion of itself. These two read
+      # observability/probe.py, which asks from a machine outside the
+      # deployment and therefore counts the requests the server never
+      # received. Postmortem 003 found a burst losing one connection in five
+      # before the process saw them, with every server-side signal green; that
+      # class of failure has no other witness.
+      #
+      # `kb_probe_up` is a gauge at one point per run, so these are thresholds
+      # on recent history rather than burn rates. There is no rate to take.
+
+      # The most serious alert in this file. A student was shown, or could have
+      # been shown, something restricted: not a slow service, not a broken one,
+      # the single rule the whole project exists to enforce. Availability and
+      # latency stay perfect throughout, so nothing else here can see it.
+      - alert: KbAccessControlFailing
+        expr: min_over_time(kb_probe_up{check=~"unauthenticated|search_refused|corpus"}[10m]) == 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: A probe that checks access control failed; restricted material may be reachable.
+          runbook: reliability/runbooks/access-control-failing.md
+
+      # Not "the service is down": the probe cannot reach it, which also covers
+      # DNS, TLS and the platform in front of the container. Ten minutes because
+      # the probe runs every fifteen and two consecutive failures should not
+      # need half an hour to become a page.
+      - alert: KbUnreachableFromOutside
+        expr: max_over_time(kb_probe_up{check="health"}[10m]) == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: The service has not answered an external probe for ten minutes.
+          runbook: reliability/runbooks/kb-down.md
+
+      # ------------------------------------------------------ state, not rate
+      # Three conditions that a counter cannot express and a log line expresses
+      # only on the one pod it happened on.
+
+      # The breaker doing its job. Open for five minutes means the model
+      # provider is genuinely gone rather than briefly slow, and /ask is
+      # refusing immediately instead of making each user wait out the timeout.
+      # A ticket, not a page: /search never calls the provider and is
+      # unaffected, so half the service is up and nobody needs waking.
+      - alert: KbBreakerOpen
+        expr: min_over_time(kb_breaker_state[5m]) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: The model provider has been failing long enough that /ask is refusing calls.
+          runbook: reliability/runbooks/breaker-open.md
+
+      # Postmortem 004's open question, as a query. count_values makes one
+      # series per distinct fingerprint, so counting those counts how many
+      # different token maps are in force. Two is a rotation in progress, and
+      # the measured window for that was 53 seconds. Two for ten minutes is a
+      # rotation that did not finish: some pod is still honouring a token
+      # somebody believes they revoked.
+      - alert: KbRotationIncomplete
+        expr: count(count_values("v", kb_tokens_version)) > 1
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: Processes disagree about the token map; a revocation has not taken effect everywhere.
+          runbook: reliability/runbooks/rotation-incomplete.md
+
+      # Postmortem 001's open item, which needed Prometheus in the cluster and
+      # now has it. One pod took every request for a full minute while its
+      # healthy replacement served none, throughput fell 59%, and not one
+      # request failed: no error ratio, no burn rate and no availability SLO
+      # could see it, because there was nothing wrong with any request.
+      #
+      # Both guards matter. Below the traffic floor the ratio is noise, and with
+      # one pod it is 1.0 and correct, which is why single-instance Cloud Run
+      # does not page anyone at 4am.
+      - alert: KbPodImbalance
+        expr: |
+          (
+              max(sum by (pod) (rate(kb_requests_total[5m])))
+            / sum(rate(kb_requests_total[5m])) > 0.9
+          )
+          and count(count by (pod) (kb_requests_total)) > 1
+          and sum(rate(kb_requests_total[5m])) > 10
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: One pod is taking nearly all the traffic while another sits idle.
+          runbook: reliability/runbooks/pod-imbalance.md

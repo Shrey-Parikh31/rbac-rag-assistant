@@ -107,10 +107,37 @@ jobs:
           docker run --rm -v "$PWD/reliability:/r" -w /r --entrypoint promtool \
             prom/prometheus:v3.14.0 test rules alerts.test.yaml
 
+      # A dashboard panel with a broken query does not fail. It draws an empty
+      # graph labelled "No data", which is also what a healthy quiet service
+      # draws, and the two are indistinguishable until somebody opens the
+      # dashboard during an incident. The same parser that checks the alerts
+      # checks the panels.
+      - name: dashboard queries parse
+        run: |
+          python observability/check_dashboards.py > /tmp/queries.yaml
+          docker run --rm -v "/tmp:/q" --entrypoint promtool \
+            prom/prometheus:v3.14.0 check rules /q/queries.yaml
+
+  # -------------------------------------------------------------- the probe
+  # A monitor that has only ever been seen to report "fine" is a green light
+  # with the bulb taken out. These tests serve the probe each failure it exists
+  # to catch, including a leak wearing a correct-looking refusal, and require it
+  # to notice.
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: the probe can say no
+        working-directory: observability
+        run: python test_probe.py
+
   # ---------------------------------------------------- build, scan, load, ship
   image:
     runs-on: ubuntu-24.04
-    needs: [quality, static, reliability]
+    needs: [quality, static, reliability, probe]
     permissions:
       contents: read
       packages: write

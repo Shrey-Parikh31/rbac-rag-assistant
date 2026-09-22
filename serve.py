@@ -20,6 +20,7 @@ ponytail: stdlib ThreadingHTTPServer, no web framework. One thread per request
 is the wrong shape above a few hundred concurrent callers; the k6 budget in CI
 is what will say when that stops being true, and gunicorn is the upgrade.
 """
+import hashlib
 import json
 import os
 import re
@@ -136,6 +137,23 @@ class Tokens:
         if TOKENS_FILE and time.monotonic() - self.checked >= 1.0:
             self._refresh()
         return self.map.get(token)
+
+    def version(self):
+        """A number that is the same on every pod honouring the same map.
+
+        Postmortem 004 could only answer "have all pods picked up the rotation?"
+        by probing both tokens through the Service until the answers stopped
+        disagreeing. A fingerprint of the map turns that into a query: during a
+        rotation this metric has two values across the pods, and afterwards one.
+
+        Of the content, not a counter, so a pod that started after the rotation
+        and a pod that reloaded into it agree; a restart counter would not.
+        """
+        with self.lock:
+            digest = hashlib.sha256(
+                "|".join(f"{t}:{r}" for t, r in sorted(self.map.items())).encode()
+            ).hexdigest()
+        return int(digest[:8], 16)   # 32 bits, exact in a float64
 
     def _refresh(self):
         with self.lock:
@@ -345,6 +363,32 @@ ASK_CONCURRENCY = 8
 ASK_SLOTS = threading.BoundedSemaphore(ASK_CONCURRENCY)
 
 
+def gauges():
+    """Current state, rendered beside the counters at /metrics.
+
+    Both of these close action items that experiments left open, and both are
+    the same shape of problem: a condition that is plainly visible in a log line
+    on one pod and invisible across a fleet. An open breaker was something you
+    found by reading stderr; a half-finished rotation was something you found by
+    probing two tokens in a loop until they agreed. As metrics they are a query.
+
+    Gauges, not counters: "the breaker is open now" is not a quantity that
+    accumulates. `rate()` of it would be meaningless, which is exactly why the
+    type matters to whoever writes the alert.
+    """
+    with BREAKER.lock:
+        state = 0 if BREAKER.opened_at is None else (2 if BREAKER.probing else 1)
+    lines = [
+        "# HELP kb_breaker_state 0 closed, 1 open, 2 half-open (one probe in flight).",
+        "# TYPE kb_breaker_state gauge",
+        f"kb_breaker_state {state}",
+        "# HELP kb_tokens_version Fingerprint of the token map this process is honouring.",
+        "# TYPE kb_tokens_version gauge",
+        f"kb_tokens_version {TOKENS.version()}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "rbac-rag"
     sys_version = ""  # the Python version is a free gift to an attacker
@@ -485,7 +529,7 @@ class Handler(BaseHTTPRequestHandler):
             # often callers reach for restricted material, which is mildly
             # sensitive, and is the reason to keep this port off the public
             # internet in a real deployment rather than behind a password.
-            payload = METRICS.render().encode()
+            payload = (METRICS.render() + gauges()).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; version=0.0.4")
             self.send_header("Content-Length", str(len(payload)))

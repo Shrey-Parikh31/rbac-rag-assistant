@@ -125,4 +125,25 @@ tokens, from inside the cluster, told the two apart.
 | Keep the previous map on a malformed rotation, and log it | done |
 | Unit test: rotation takes effect, malformed rotation is ignored | done |
 | Experiment runs in CI with a 150s deadline | done |
-| Expose the token-map version as a metric, so "have all pods rotated?" is a query rather than a probe loop | **open**: Layer 5 |
+| Expose the token-map version as a metric, so "have all pods rotated?" is a query rather than a probe loop | done: `kb_tokens_version`, `KbRotationIncomplete` |
+
+## Closed in Layer 5
+
+`kb_tokens_version` is a fingerprint of the map itself, not a reload counter.
+That distinction is the whole value: a pod that started *after* the rotation and
+a pod that reloaded *into* it are honouring the same tokens and must report the
+same number, which a counter of reloads would not. During a rotation the
+processes show two values; when they show one, the revocation has landed
+everywhere.
+
+`count(count_values("v", kb_tokens_version)) > 1` for ten minutes files a ticket.
+Ten, not one: the 53-second convergence measured above is normal and must not
+alert, and the failure worth a ticket is the pod that never picks it up at all,
+which is the original failure in this postmortem.
+
+The probe-loop table at the top of this page is now
+`observability/dashboards/service.json`, one row per process. There is a unit
+test for the one way this metric could lie: **a malformed rotation must not move
+the fingerprint.** If it did, a rejected rotation would look on the dashboard
+exactly like a completed one, and the alert would clear while the leaked token
+still worked everywhere.

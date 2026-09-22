@@ -78,8 +78,17 @@ def check_metrics(base):
     """
     with urllib.request.urlopen(base + "/metrics", timeout=10) as r:
         text = r.read().decode()
-    for name in ("kb_requests_total", "kb_request_duration_seconds", "kb_search_outcomes_total"):
+    for name in ("kb_requests_total", "kb_request_duration_seconds", "kb_search_outcomes_total",
+                 "kb_breaker_state", "kb_tokens_version"):
         assert f"# TYPE {name}" in text, f"{name} missing from /metrics"
+
+    # Types are not decoration. A gauge declared as a counter is one that rate()
+    # will happily produce a number from, and the number will be wrong in a
+    # direction nobody thinks to check. Both dashboards read these as state.
+    for name in ("kb_breaker_state", "kb_tokens_version"):
+        assert f"# TYPE {name} gauge" in text, f"{name} must be exposed as a gauge"
+    assert "\nkb_breaker_state 0\n" in text, \
+        "the breaker should read closed after a run with no provider failures"
 
     # The request to /nope earlier must be counted as route="other". A label
     # copied from the path would let anyone mint a time series per URL.
@@ -363,6 +372,20 @@ def check_token_reload():
             return urllib.request.urlopen(req, timeout=10).status
         except urllib.error.HTTPError as e:
             return e.code
+
+    def fingerprint():
+        """What kb_tokens_version currently reads.
+
+        KbRotationIncomplete fires when processes disagree about this number,
+        so the number has to mean what the alert assumes: same map, same value,
+        and a value that moves only when the map really did.
+        """
+        with urllib.request.urlopen(base + "/metrics", timeout=10) as r:
+            for line in r.read().decode().splitlines():
+                if line.startswith("kb_tokens_version "):
+                    return line.split()[1]
+        raise AssertionError("kb_tokens_version is not exposed")
+
     try:
         for _ in range(60):
             try:
@@ -371,17 +394,29 @@ def check_token_reload():
             except OSError:
                 time.sleep(0.25)
         assert status("old-token") == 200 and status("new-token") == 401
+        before = fingerprint()
 
         with open(path, "w") as f:
             f.write("new-token:student")
         time.sleep(1.5)
         assert status("old-token") == 401, "a revoked token still works after rotation"
         assert status("new-token") == 200, "the rotated-in token is not accepted"
+        rotated = fingerprint()
+        assert rotated != before, \
+            "the token map changed and kb_tokens_version did not, so a stuck pod " \
+            "would look identical to one that had rotated"
 
         with open(path, "w") as f:
             f.write("this is not a token map")
         time.sleep(1.5)
         assert status("new-token") == 200, "a malformed rotation locked out a valid token"
+        # The map in force did not change, so the fingerprint must not either.
+        # If it moved here, a rejected rotation would read as a completed one on
+        # the dashboard and KbRotationIncomplete would clear while nothing had
+        # actually been revoked.
+        assert fingerprint() == rotated, \
+            "a rejected rotation moved the fingerprint, which would report a " \
+            "revocation that did not happen"
     finally:
         p.kill()
 

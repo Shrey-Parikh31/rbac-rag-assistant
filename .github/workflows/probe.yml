@@ -1,0 +1,63 @@
+# Ask the deployed service the same five questions, from outside it, forever.
+#
+# Every other number this project collects is the server's opinion of itself.
+# Two experiments showed the limit of that: a listen backlog turning away one
+# connection in five before the process existed, and a pod serving nothing
+# beside one at its CPU limit. Both had perfect server-side metrics throughout.
+# A machine somewhere else, asking over the public internet, is the only witness
+# to the requests that never arrived.
+#
+# GitHub Actions is the cheapest scheduler that is not the thing being watched.
+# That last part is the point: a monitor running inside the deployment goes down
+# with it and reports nothing, which reads exactly like everything being fine.
+#
+# ponytail: a cron job, not a hosted synthetic monitor. A synthetic monitor
+# checks that a URL returns 200; three of these five checks are about what is in
+# the body, and one of them is whether a student was shown something they should
+# not have been.
+name: probe
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub's scheduler is best-effort and runs late under
+    # load, which is fine: the alerts are windows, not "exactly four per hour".
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Base URL to probe"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # A run that overlaps the next one would push two points with almost the same
+  # timestamp and make a duration graph look like jitter that is not there.
+  group: probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # No pip install. The probe is stdlib only, so the thing that watches the
+      # service has no supply chain of its own to fail or be compromised.
+      - name: ask from outside
+        env:
+          KB_URL: ${{ inputs.url || 'https://kb-zv5i45k6sq-uc.a.run.app' }}
+          KB_PROBE_ORIGIN: github-actions
+          GRAFANA_PUSH_URL: ${{ secrets.GRAFANA_PUSH_URL }}
+          GRAFANA_USER: ${{ secrets.GRAFANA_USER }}
+          GRAFANA_TOKEN: ${{ secrets.GRAFANA_TOKEN }}
+        run: python observability/probe.py --push
+
+      # Deliberately not `--fail-on-error`. A red cross on every schedule the
+      # service happened to be cold is how a repository teaches its owner to
+      # stop reading the little icon. The alert rules decide what is worth
+      # somebody's attention; this job's job is to produce the measurement.
