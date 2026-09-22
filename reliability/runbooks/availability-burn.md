@@ -1,4 +1,4 @@
-# KbAvailabilityBurn — search is failing too often
+# KbAvailabilityBurn: search is failing too often
 
 **SLO:** 99.5% of `/search` requests do not return a 5xx, over 30 days.
 

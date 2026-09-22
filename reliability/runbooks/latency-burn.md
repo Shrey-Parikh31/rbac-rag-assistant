@@ -1,4 +1,4 @@
-# KbLatencyBurn — search is too slow
+# KbLatencyBurn: search is too slow
 
 **SLO:** 99% of `/search` requests complete within 50ms, measured at the server,
 over 30 days. Same burn-rate structure as availability: 14.4x or 6x pages, 1x

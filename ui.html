@@ -161,7 +161,7 @@
         <pre id="passage" aria-live="polite">Ask a question, or try one of the examples.</pre>
         <div class="why" id="why">Three things can happen: you are shown the passage,
           you are told that matching material exists above your clearance, or nothing
-          in the corpus covers it. The third is not a failure — refusing to invent an
+          in the corpus covers it. The third is not a failure; refusing to invent an
           answer is the point.</div>
       </div>
     </div>
@@ -212,7 +212,7 @@
             "The bar shows cosine similarity; the notch is the 0.61 floor, below which a " +
             "match is treated as no match.",
     restricted: "Refused: material matching your question exists above your clearance. " +
-                "You are told it exists and nothing about what it says — not even which " +
+                "You are told it exists and nothing about what it says, not even which " +
                 "office owns it, because naming the owner describes the document.",
     no_match: "Nothing found: no document covers this at any clearance level. Saying so " +
               "beats inventing an answer, and the evaluation set exists to keep that honest.",
@@ -231,7 +231,7 @@
     $("token").classList.remove("bad");
     if (!token) {
       badge($("who"), $("who-text"), "who none", "no token");
-      $("docs").textContent = "—";
+      $("docs").textContent = "none";
       return;
     }
     badge($("who"), $("who-text"), "who none", "checking…");
@@ -240,7 +240,7 @@
       if (r.status !== 200) {
         $("token").classList.add("bad");
         badge($("who"), $("who-text"), "who warn", r.status === 401 ? "token not accepted" : "HTTP " + r.status);
-        $("docs").textContent = "—";
+        $("docs").textContent = "none";
         return;
       }
       const b = await r.json();

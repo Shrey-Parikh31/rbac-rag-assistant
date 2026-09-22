@@ -5,7 +5,7 @@ deploys itself, and you never touch Google Cloud again.
 
 **What it costs.** Cloud Run only runs the container while somebody is actually
 asking it a question, and sleeps at zero the rest of the time. The free
-allowance is **2 million requests a month, permanently** — not a trial — in the
+allowance is **2 million requests a month, permanently**, not a trial, in the
 `us-central1` region, which is what this setup uses. A portfolio service gets
 a few hundred. The realistic bill is **$0.00**.
 
@@ -39,12 +39,12 @@ already in the public repository. Nothing private is in it.
 1. <https://console.cloud.google.com> → sign in with your Google account
 2. It will ask for a **card**. This is required even though you stay in the free
    tier. Google does not charge it unless you explicitly click "Activate full
-   account" — a free trial that runs out **stops** rather than bills you.
+   account": a free trial that runs out **stops** rather than bills you.
 3. When it offers the **$300 free trial**, take it. It is 90 days of credit you
    will not come close to using, and it changes nothing about the permanent free
    tier underneath it.
 4. At the top, **create a new project** named `rbac-rag`. Note the **Project ID**
-   it generates — it is usually `rbac-rag-######`, not just `rbac-rag`.
+   it generates: it is usually `rbac-rag-######`, not just `rbac-rag`.
 
 ---
 
@@ -229,7 +229,7 @@ Push to `main` → the pipeline runs its gates → if all pass:
 
 1. A new revision deploys to Cloud Run **with no traffic**, on its own private
    URL.
-2. The full end-to-end suite runs against that revision — on the internet, in
+2. The full end-to-end suite runs against that revision, on the internet, in
    the region, with the real secrets.
 3. Only if it passes does traffic move to it.
 

@@ -88,12 +88,12 @@ the tune questions. It is reported, not hidden.
 
 91 cases in `golden.jsonl`, one per line. `kind` is the expected behaviour:
 
-- **`answer`** — a document the caller may read should come back, and `source`
+- **`answer`**: a document the caller may read should come back, and `source`
   names which one. Returning *a* document is not a pass.
-- **`restricted`** — nothing readable matches but material at `level` does, and
+- **`restricted`**: nothing readable matches but material at `level` does, and
   the notice must name the right level.
-- **`absent`** — nothing covers this at any clearance level.
-- **`action`** — a command that must invoke a tool, or must be blocked from it.
+- **`absent`**: nothing covers this at any clearance level.
+- **`action`**: a command that must invoke a tool, or must be blocked from it.
 
 ### What was added, and why
 
@@ -306,7 +306,7 @@ separate command on purpose: a gate that updates its own baseline when it fails
 measures nothing, so lowering the bar has to appear in a diff.
 
 **It has been watched failing.** Raising `MIN_SCORE` from 0.61 to 0.68 produced
-exit 1, fifteen named regressions, and four improvements — and that combination
+exit 1, fifteen named regressions, and four improvements, and that combination
 is the case for this design, because a percentage gate would have reported the
 net and blocked nothing.
 
@@ -328,8 +328,7 @@ down above as a step rather than remembered as a thing that was probably done.
 
 `test_serve.py` started a server on a fixed port and waited for `/health` to
 answer. A server left running from an earlier session answers instantly, so the
-spawn loop saw a healthy service and the whole suite tested **the stale process**
-— its code, and its credentials.
+spawn loop saw a healthy service and the whole suite tested **the stale process**: its code, and its credentials.
 
 It was caught by a question that should have been impossible. The suite is meant
 to prove the system serves retrieval with no API key, and a question with no
@@ -351,7 +350,7 @@ service had not gone down. The rollout was correctly refused and the pods were
 serving; the check was wrong.
 
 `kubectl port-forward svc/kb` reads as though it goes through the Service and
-does not — it selects a single pod and tunnels straight to it. So it reported
+does not: it selects a single pod and tunnels straight to it. So it reported
 one pod's health while appearing to report the Service's, and it happened to
 survive a pod deletion on one run and die on the next.
 
@@ -366,7 +365,7 @@ connected to a stale server from an earlier session. A tunnel to one pod
 answering a question about a Service.
 
 Every one of them passed while being wrong, which is the only reason the list is
-this long — a measurement that fails loudly gets fixed the same afternoon.
+this long: a measurement that fails loudly gets fixed the same afternoon.
 
 ### Instrument bug eighteen
 

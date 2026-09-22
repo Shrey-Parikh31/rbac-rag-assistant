@@ -1,4 +1,4 @@
-# KbIndexLooksBroken — everything succeeds, nothing is found
+# KbIndexLooksBroken: everything succeeds, nothing is found
 
 **Severity:** ticket. **Means:** more than half of searches in 15 minutes found no
 passage above the similarity floor, with at least 50 searches in that time.

@@ -96,7 +96,7 @@ looking for:
 1 x  HTTP None  client gave up: ConnectionResetError
 ```
 
-One of thirty callers got no HTTP response at all — not the fast 503, nothing.
+One of thirty callers got no HTTP response at all, not the fast 503, nothing.
 The connection was reset before the server saw it.
 
 `socketserver`'s default listen backlog is **5**: five connections the kernel has
@@ -127,5 +127,5 @@ measuring at the server means measuring only the requests that got in.
 | Bulkhead: 8 concurrent `/ask` | done |
 | Experiment runs in CI and fails on regression | done |
 | Listen backlog 5 → `SOMAXCONN`; a 200-connection burst test | done |
-| Breaker state as a metric and an alert, so an open breaker is visible without reading logs | **open** — belongs with Layer 5 |
-| A client-side probe measuring availability from outside, since the server cannot count what never reaches it | **open** — belongs with Layer 5 |
+| Breaker state as a metric and an alert, so an open breaker is visible without reading logs | **open**: belongs with Layer 5 |
+| A client-side probe measuring availability from outside, since the server cannot count what never reaches it | **open**: belongs with Layer 5 |

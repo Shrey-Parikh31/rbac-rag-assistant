@@ -1,4 +1,4 @@
-# KbDown — nobody is answering
+# KbDown: nobody is answering
 
 **Severity:** page. **Means:** Prometheus has failed to scrape any instance for
 two minutes. Every other alert is blind to this, because a process that is not

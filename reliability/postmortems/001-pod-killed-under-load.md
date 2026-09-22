@@ -79,7 +79,7 @@ same run was unchanged. So the drop was caused by the change.
 
 The hypothesis: Kubernetes balances *connections*, not requests. A Service
 chooses a pod when a connection opens and never again. During the drain, every
-client reconnected at once — and at that moment the replacement pod was still
+client reconnected at once, and at that moment the replacement pod was still
 starting, so the survivor was the only ready endpoint. Everyone landed there, and
 keep-alive held them there.
 
@@ -147,4 +147,4 @@ the regression would have shipped with a green build.
 | Experiment runs 75s, past the grace period | done |
 | Experiment fails the build on a single failed request | done |
 | Per-pod request counts printed after every run | done |
-| Alert on per-pod imbalance under load | **open** — needs Prometheus in the cluster, which is Layer 5 |
+| Alert on per-pod imbalance under load | **open**: needs Prometheus in the cluster, which is Layer 5 |

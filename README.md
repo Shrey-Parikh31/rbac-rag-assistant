@@ -1,7 +1,7 @@
 # rbac-rag-assistant
 
-Related: [drivescore-cloud](https://github.com/Shrey-Parikh31/drivescore-cloud), a Go
-service on Kubernetes with Terraform and an incident log.
+Other projects: [highschool-rag-chatbot](https://github.com/Shrey-Parikh31/highschool-rag-chatbot) ·
+[drivescore-cloud](https://github.com/Shrey-Parikh31/drivescore-cloud)
 
 An internal knowledge assistant for a university: staff and students ask
 questions in plain language, and get answers grounded in policy documents they
@@ -106,8 +106,8 @@ things make it a gate rather than a report:
 | Trivy | a critical CVE with an available fix is in the image |
 
 **Both scanners caught something real on their first run.** Trivy refused to
-publish over three criticals in `perl-base` — a heap overflow compiling regular
-expressions, a path traversal in `Archive::Tar` — all with a patched version
+publish over three criticals in `perl-base`: a heap overflow compiling regular
+expressions, a path traversal in `Archive::Tar`, all with a patched version
 already released, inherited from a `python:3.12-slim` base rebuilt on somebody
 else's schedule. semgrep found SHA1 in the embedding cache key, which was
 changed to SHA256 rather than suppressed (ADR-17).
@@ -150,25 +150,25 @@ deployment.apps/kb rolled back    →  serve: ok
 
 The rollback step inverts the exit code of `kubectl rollout status` on purpose:
 a rollback test that never observes a *failed* rollout proves nothing. It also
-gives Layer 2 somewhere to run chaos experiments — "kill pods mid-request" is
+gives Layer 2 somewhere to run chaos experiments: "kill pods mid-request" is
 not a sentence that means anything on a serverless host.
 
 **A URL, on Cloud Run.** The container runs only while somebody is asking it
 something and sleeps at zero otherwise, inside a permanent free allowance of two
 million requests a month. A new revision deploys carrying **no traffic**, the
 end-to-end suite runs against it on its own tagged URL, and only then does
-traffic move — so a broken revision is never in front of a user and there is
+traffic move, so a broken revision is never in front of a user and there is
 nothing to roll back from. Setup is `deploy/GOOGLE_CLOUD_SETUP.md`; the job is
 skipped entirely until `GCP_PROJECT_ID` exists, so this repository stays green
 for anyone who clones it without a cloud account.
 
-Authentication is Workload Identity Federation — GitHub signs a statement naming
+Authentication is Workload Identity Federation: GitHub signs a statement naming
 the repository and the run, Google is configured to accept exactly that, and no
 long-lived key is stored anywhere.
 
 The quality gate compares **cases, not percentages**, because a percentage
 cannot see a swap: one case fixed, one broken, score unchanged (ADR-14). It was
-verified by breaking it on purpose — raising the retrieval floor from 0.61 to
+verified by breaking it on purpose: raising the retrieval floor from 0.61 to
 0.68 made it exit 1, name fifteen regressed cases, and report four improvements
 that a percentage would have netted off.
 

@@ -14,7 +14,7 @@ illustration.
 
 ---
 
-## INC-1042 — "search is slow since this morning's deploy"
+## INC-1042: "search is slow since this morning's deploy"
 
 > *Since the update this morning search feels sluggish. Not broken, everything
 > loads, just slower. A couple of us noticed around the same time.*
@@ -55,7 +55,7 @@ breakdown showed it.
 
 ---
 
-## INC-1043 — "I rotated my token and now nothing works"
+## INC-1043: "I rotated my token and now nothing works"
 
 > *My token was visible in a screenshot I shared, so I asked for it to be
 > rotated. IT says it's done. My new token gets "bearer token required" and I've
@@ -93,7 +93,7 @@ second; a rotation takes effect everywhere in about a minute with no restart.
 
 ---
 
-## INC-1044 — "it keeps giving me the wrong policy"
+## INC-1044: "it keeps giving me the wrong policy"
 
 > *I asked how late I can add a class and it gave me something about grade
 > appeals. Asked again differently, same thing. Is this thing broken? It says
@@ -129,7 +129,7 @@ never receives traffic. [Postmortem 002](postmortems/002-broken-vector-store.md)
 
 ---
 
-## INC-1045 — "Ask spins for a minute then errors, every single time"
+## INC-1045: "Ask spins for a minute then errors, every single time"
 
 > *The Ask feature hangs for about a minute and then says it couldn't reach the
 > model provider. I tried five times. Search still works fine. Is it just me?*
@@ -159,7 +159,7 @@ would now be answered in zero seconds with an explanation.
 
 ---
 
-## INC-1046 — "connection reset during registration"
+## INC-1046: "connection reset during registration"
 
 > *When registration opened at 9 a.m. a bunch of us got "connection reset" or
 > "couldn't connect" trying to look up the add/drop deadline. Refreshing usually

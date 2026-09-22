@@ -125,4 +125,4 @@ tokens, from inside the cluster, told the two apart.
 | Keep the previous map on a malformed rotation, and log it | done |
 | Unit test: rotation takes effect, malformed rotation is ignored | done |
 | Experiment runs in CI with a 150s deadline | done |
-| Expose the token-map version as a metric, so "have all pods rotated?" is a query rather than a probe loop | **open** — Layer 5 |
+| Expose the token-map version as a metric, so "have all pods rotated?" is a query rather than a probe loop | **open**: Layer 5 |
