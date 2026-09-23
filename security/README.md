@@ -6,16 +6,14 @@ Everything else measured here asks whether the system does what it should. This
 asks whether it can be made to do what it must not. A control that has never
 been attacked is not known to work; it is only unrefuted.
 
-**Status: the corpus is built and the harness is verified. The measurement is
-not finished.** 51 attacks exist, 21 of them currently reach the system, and 30
-cannot run until their text is embedded once. Those 30 are reported as
-"no result" and explicitly not counted as defended, for reasons the next section
-is entirely about.
+**51 attacks, 51 delivered, 0 succeeded**, against the surfaces a caller can
+reach without a model in the loop. That number is worth reading only alongside
+the section below on what it took to make it mean anything.
 
-## Two bugs found before a single attack succeeded
+## Three bugs found before a single attack succeeded
 
-Neither was in the system. Both were in the thing measuring it, which is where
-this project keeps finding them.
+None were in the system. All three were in the thing measuring it, which is
+where this project keeps finding them.
 
 ### The scorer asked the system whether the system was wrong
 
@@ -61,6 +59,22 @@ The first version inferred failure by checking whether the response began with
 `<`, which classified `ui.html` as a harness error because it begins
 `<!doctype html>`. Runners now report delivery failure explicitly rather than
 having it guessed from their output.
+
+### The same suite scored 0 of 22 or 16 of 22 depending on the directory it ran in
+
+`KB_DOCS` defaults to the relative string `docs`. Run from `security/`, the
+index pointed at `security/docs`, which does not exist, so it held zero chunks.
+Every search returned nothing. Every leak attack reported that the system had
+held. From the repository root the identical suite detected sixteen.
+
+**Nothing in the output told the two apart.** A perfect score against an empty
+corpus and a perfect score against a defended one printed the same line.
+
+This project has had this bug before, in an access test that passed because
+nothing could be retrieved. Pinning the path is half the fix. The other half is
+`assert_corpus_loaded()`, which refuses to report at all unless the index holds
+documents **and** at least one of them is restricted: with nothing to disclose,
+there is nothing for a leak attack to leak, and the whole corpus is decoration.
 
 ## The corpus
 
@@ -118,8 +132,17 @@ the attacks to notice:
   and scoring it as one produces findings nobody can act on
 - `innerHTML` introduced between a retrieved passage and the screen
 - the system prompt planted inside a document, where no jailbreak is needed
+- an empty corpus, and the subtler version of it, a corpus that loaded with
+  nothing restricted in it; both must abort the run rather than score it
 - every attack having a win condition the scorer implements, so an unscoreable
   attack raises instead of quietly counting as a pass
+
+With the clearance filter removed, **16 of the 22 leak attacks fire**. The six
+that stay quiet are named in the test with a reason each, rather than rounded
+away: three are payloads too far from any document to clear the similarity floor
+even unfiltered, one is aimed at a role that test did not widen, and two are
+empty or whitespace and are refused before retrieval. If that set changes, the
+test fails and somebody has to say why.
 
 ## Cost
 
@@ -127,8 +150,10 @@ The runner is free and needs no key, once each attack's text is in
 `vectors.json`. That is the same arrangement as the golden set: embed once,
 commit the vectors, run forever on every push at no cost.
 
-The one-time embedding of the 30 outstanding attack texts is about 458 tokens,
-roughly **$0.00007** at the current rate for `gemini-embedding-001`.
+That one-time cost has been paid: 28 texts, about 458 tokens, **$0.00007**.
+Two payloads were skipped because they are empty or whitespace and are refused
+before retrieval, so a vector for them would never be looked up.
+`warm_cache.py --dry-run` prices any future additions before sending them.
 
 **The model surface is not in this file.** Indirect injection, where an
 instruction is hidden inside a document and the question is whether the model
@@ -137,7 +162,6 @@ priced before it runs, and it is the next piece of work here.
 
 ## Still to come
 
-- Embed the 30 outstanding attack texts, and wire `--gate` into CI
 - The model surface: indirect prompt injection through document contents,
   insecure output handling on generated text, and grounding under adversarial
   pressure

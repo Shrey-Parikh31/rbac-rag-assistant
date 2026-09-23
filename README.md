@@ -107,6 +107,8 @@ things make it a gate rather than a report:
 | `promtool test rules` | an alert stops firing, stops clearing, or starts firing on a blip |
 | `observability/check_dashboards.py` | a dashboard panel asks for a metric nothing emits |
 | `observability/test_probe.py` | the external probe stops noticing a leak, a wrong document or an empty index |
+| `security/redteam.py --gate` | any of 51 attacks succeeds, or any of them cannot be delivered |
+| `eval/retrieval.py` clearance drift | the system grants access the audit table does not |
 
 **Both scanners caught something real on their first run.** Trivy refused to
 publish over three criticals in `perl-base`: a heap overflow compiling regular
@@ -219,6 +221,39 @@ It costs nothing to run: every question the probe asks is already in the vector
 cache, so no check reaches the embedding provider.
 
 Details in [`observability/`](observability/).
+
+## Attacking it
+
+51 attacks from the OWASP Top 10 for LLM Applications, in
+[`security/`](security/), run against the real tools, a real server and the real
+corpus on every push. **51 delivered, 0 succeeded**, across prompt injection,
+sensitive disclosure, excessive agency, system prompt leakage, embedding
+weaknesses and unbounded consumption.
+
+Three bugs came out of building it, and none of them were in the system:
+
+**The leak gate asked the system whether the system was wrong.** It decided
+whether a disclosure was permitted by reading the same clearance table the
+system uses to decide. Widen a role by one character and the system hands over
+staff documents while the gate reports zero leaks, on a green build. Proved by
+removing the clearance filter and watching all 22 leak attacks report that
+nothing got through. The scorer now holds its own table, and a disagreement
+between the two fails the build.
+
+**Thirty attacks never ran, and all thirty were counted as defended.** Their
+text was not in the vector cache and the run had no key, so each raised an
+exception that became the response the scorer then found no leak in. The first
+report said `0.0% attack success rate` about attacks that never reached the
+system. Delivery is now reported separately from defence, and an undelivered
+attack fails the gate exactly as a successful one does.
+
+**The same suite scored 0 of 22 or 16 of 22 depending on which directory it ran
+in**, because the corpus path was relative and an empty index answers every
+attack with "no match". The run now refuses to report unless the index holds
+documents and at least one of them is restricted.
+
+Full write-up, including the six attacks that stay quiet even with the filter
+removed and why each one does: [`security/README.md`](security/README.md).
 
 ## How it fits together
 

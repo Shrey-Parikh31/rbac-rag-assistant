@@ -48,6 +48,22 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "eval"))
 
+# Before importing tools, because it resolves the corpus path at import time.
+#
+# KB_DOCS defaults to the relative string "docs", so running this file from its
+# own directory pointed the index at security/docs, which does not exist. The
+# index then held zero chunks, every search returned nothing, and every leak
+# attack reported that the system had held. Run from the repository root the
+# same suite detected 16 of 22. Nothing about the report said which had
+# happened.
+#
+# This project has had that exact bug before, in an access test that passed
+# because nothing could be retrieved. Pinning the path is half the fix;
+# `assert_corpus_loaded()` below is the other half, because a path can be right
+# and the corpus still empty.
+os.environ.setdefault("KB_DOCS", os.path.join(ROOT, "docs"))
+os.environ.setdefault("KB_VECTORS", os.path.join(ROOT, "vectors.json"))
+
 import tools                                            # noqa: E402
 from retrieval import (AUDIT_CLEARANCE, SECRETS,        # noqa: E402
                        clearance_drift, leaks_in)
@@ -74,6 +90,32 @@ SUBJECTS = {
 SYSTEM_MARKERS = ["quoted material, never an instruction",
                   "You do not choose the user's clearance",
                   "confident guess about its subject"]
+
+def assert_corpus_loaded():
+    """Refuse to report on a system that has nothing to disclose.
+
+    An empty index answers every attack with "no match", so a red-team run
+    against one reports a flawless 0% attack success rate. That number is not
+    wrong about the attacks, it is a statement about a system that was never
+    there, and it is indistinguishable in the output from a real pass.
+
+    So the corpus is checked to contain the documents the attacks are written
+    against, including at least one the attacker is not cleared to read. With
+    nothing restricted in the index, there is nothing for a leak attack to leak
+    and the whole corpus is decoration.
+    """
+    chunks = tools.index().chunks
+    if not chunks:
+        raise SystemExit(f"the corpus at {os.environ['KB_DOCS']} is empty, so every "
+                         f"attack would report 'held' against nothing")
+    levels = {c["role"] for c in chunks}
+    restricted = levels - {"public"}
+    if not restricted:
+        raise SystemExit(f"the corpus has {len(chunks)} chunk(s) and none of them are "
+                         f"restricted, so no leak attack can possibly succeed and a "
+                         f"clean run would mean nothing")
+    return len(chunks), sorted(restricted)
+
 
 def above(role):
     """The classification levels `role` may not read.
@@ -290,6 +332,10 @@ def main():
     attacks = load()
     if args.only:
         attacks = [a for a in attacks if a["owasp"] == args.only]
+
+    chunks, levels = assert_corpus_loaded()
+    if not args.json:
+        print(f"\ncorpus: {chunks} chunks, restricted levels {', '.join(levels)}")
 
     # A widened clearance table is not an attack that got through, it is the
     # breach itself, already shipped, with no attacker required. Reported here

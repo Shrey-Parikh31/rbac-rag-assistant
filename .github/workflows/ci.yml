@@ -118,6 +118,36 @@ jobs:
           docker run --rm -v "/tmp:/q" --entrypoint promtool \
             prom/prometheus:v3.14.0 check rules /q/queries.yaml
 
+  # ------------------------------------------------------------------ attacks
+  # 51 attacks from the OWASP Top 10 for LLM Applications, run against the real
+  # tools, a real server and the real corpus. Free and offline: every attack's
+  # text is embedded once and committed, exactly like the golden set, so this
+  # runs on every push rather than on a good day.
+  #
+  # --gate fails on three things, and the third is the one worth naming: an
+  # attack that could not be delivered. Counting those as defended is how a
+  # red-team report claims safety it never tested, and this file did it once.
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # First, because a green attack run against a system with no defences
+      # prints the same line as a green run against a system with them.
+      - name: the attacks can tell a defended system from an undefended one
+        run: python security/test_redteam.py
+
+      - name: nothing gets through, and everything ran
+        env:
+          NO_DOTENV: "1"
+          KB_READ_ONLY_CACHE: "1"
+        run: python security/redteam.py --gate
+
   # -------------------------------------------------------------- the probe
   # A monitor that has only ever been seen to report "fine" is a green light
   # with the bulb taken out. These tests serve the probe each failure it exists
@@ -137,7 +167,7 @@ jobs:
   # ---------------------------------------------------- build, scan, load, ship
   image:
     runs-on: ubuntu-24.04
-    needs: [quality, static, reliability, probe]
+    needs: [quality, static, reliability, probe, security]
     permissions:
       contents: read
       packages: write
