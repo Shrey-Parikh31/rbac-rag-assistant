@@ -48,6 +48,42 @@ SECRETS = {
 }
 
 
+# The scorer's own statement of who may read what, deliberately written down
+# here rather than imported.
+#
+# Found by the Layer 4 attack corpus, and it is the nineteenth measurement bug
+# in this project. `cleared()` used to ask `rag.CLEARANCE`, the table the system
+# itself uses to decide. So the question "was this disclosure allowed?" was
+# being put to the very configuration that allowed it. Widen a role by accident,
+# a one-character edit giving students the staff level, and the system hands
+# over staff documents while this gate reports zero leaks and the build goes
+# green. The test moved with the bug.
+#
+# A leak gate has to hold an opinion the system cannot change. This is that
+# opinion. `clearance_drift()` then requires the two to agree, so a real change
+# to who may read what has to be made twice, in two files, by somebody who
+# meant it both times.
+AUDIT_CLEARANCE = {"student": {"public"},
+                   "staff": {"public", "staff"},
+                   "admin": {"public", "staff", "confidential"}}
+
+
+def clearance_drift():
+    """Roles where the running system disagrees with the audit table above.
+
+    Empty when they agree. Any entry is a build failure: either access was
+    widened without updating the thing that checks it, or the check was updated
+    to match a mistake.
+    """
+    out = []
+    for role in sorted(set(AUDIT_CLEARANCE) | set(CLEARANCE)):
+        want, got = AUDIT_CLEARANCE.get(role, set()), CLEARANCE.get(role, set())
+        if want != got:
+            out.append(f"{role}: system grants {sorted(got - want) or 'nothing extra'}, "
+                       f"audit table expects {sorted(want)}")
+    return out
+
+
 def leaks_in(text, role, question=""):
     """Restricted strings in `text` that `role` may not see.
 
@@ -63,8 +99,13 @@ def leaks_in(text, role, question=""):
 
 
 def cleared(role, level):
-    """Is `role` allowed to read material classified `level`?"""
-    return level in CLEARANCE.get(role, {"public"})
+    """Is `role` allowed to read material classified `level`?
+
+    Answered from AUDIT_CLEARANCE, never from the system's own table. See the
+    comment above it for what happens when a scorer asks the thing it is
+    scoring.
+    """
+    return level in AUDIT_CLEARANCE.get(role, {"public"})
 
 
 KINDS = ("answer", "restricted", "absent", "action")
@@ -287,6 +328,21 @@ if __name__ == "__main__":
     ap.add_argument("--gate", action="store_true", help="exit 1 on a regression; for CI")
     ap.add_argument("--accept", action="store_true", help="record current results as the baseline")
     args = ap.parse_args()
+
+    # Before anything is scored. Every leak number below is computed against
+    # AUDIT_CLEARANCE, so if the running system no longer matches it, the two
+    # halves of this file are measuring different systems and no result it
+    # prints can be trusted. Loud and first, rather than a footnote under a
+    # green table.
+    drift = clearance_drift()
+    if drift:
+        print("CLEARANCE DRIFT: the system and the audit table disagree about "
+              "who may read what.", file=sys.stderr)
+        for line in drift:
+            print(f"  {line}", file=sys.stderr)
+        print("Fix rag.CLEARANCE, or change AUDIT_CLEARANCE in this file if the "
+              "new access really is intended.", file=sys.stderr)
+        raise SystemExit(2)
 
     results = score(load_golden())
     if args.json:
