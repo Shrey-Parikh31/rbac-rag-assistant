@@ -21,6 +21,7 @@ import functools
 from google import genai
 from google.genai import types, errors
 
+import guardrails
 import rag
 import tools
 
@@ -162,7 +163,26 @@ def ask(question, role="student"):
     usage = response.usage_metadata
     embed_s = round(rag.EMBED_SECONDS - embed_before, 2)
     total = time.monotonic() - started
-    return {"text": response.text or "(no answer returned)",
+
+    # The last control, and the only one that runs after the model rather than
+    # before it. Everything else decides what the model may see; this decides
+    # what it may say about what it saw. `sources` is what the tools actually
+    # returned this turn, which is the one thing that separates "repeated a
+    # passage it was given" from "produced that from its own knowledge of the
+    # document it was refused".
+    text = response.text or "(no answer returned)"
+    shown = "\n".join(s["result"] for s in sources)
+    passed, reason, text = guardrails.check(text, role, question, shown)
+    if not passed:
+        # Loud, never silent. A guardrail that swallows what it blocked leaves
+        # nobody able to tell a model that misbehaved from one that was asked
+        # something it could not answer, and the evaluation harness cannot
+        # score a failure it is not shown.
+        print(f"guardrail blocked an answer for role {role!r}: {reason}",
+              file=sys.stderr)
+
+    return {"text": text,
+            "guardrail": {"passed": passed, "reason": reason},
             "tools": calls,
             "sources": sources,
             "latency_s": round(total, 2),
@@ -178,7 +198,11 @@ def ask(question, role="student"):
 
 def _failed(text, status, started, retry_after=None):
     """Same shape as a success, so a caller never has to branch on the type."""
-    return {"text": text, "tools": [], "sources": [], "latency_s": round(time.monotonic() - started, 2),
+    # The guardrail key is here for the reason in the docstring: a caller that
+    # reads result["guardrail"]["passed"] must not crash on the error path, and
+    # nothing was generated to block.
+    return {"text": text, "guardrail": {"passed": True, "reason": ""},
+            "tools": [], "sources": [], "latency_s": round(time.monotonic() - started, 2),
             "in_tokens": None, "out_tokens": None, "total_tokens": None,
             "model": MODEL, "status": status, "retry_after": retry_after}
 

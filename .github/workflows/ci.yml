@@ -148,6 +148,15 @@ jobs:
           KB_READ_ONLY_CACHE: "1"
         run: python security/redteam.py --gate
 
+      # The output check, and the drift test that keeps it honest. guardrails.py
+      # holds its own copy of the restricted vocabulary instead of importing the
+      # scorer's, so this asserts the system's list still covers the checker's.
+      # Two copies only help if something compares them.
+      - name: the output guardrail, and its vocabulary has not drifted
+        run: |
+          python guardrails.py
+          python security/test_guardrails.py
+
   # -------------------------------------------------------------- the probe
   # A monitor that has only ever been seen to report "fine" is a green light
   # with the bulb taken out. These tests serve the probe each failure it exists

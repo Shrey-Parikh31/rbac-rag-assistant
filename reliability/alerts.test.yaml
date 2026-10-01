@@ -256,7 +256,9 @@ tests:
       - eval_time: 10h
         alertname: KbProbeStopped
         exp_alerts:
-          - exp_labels: { severity: ticket }
+          # absent_over_time keeps the matcher's labels, so the alert carries
+          # check="health" and says which probe went quiet.
+          - exp_labels: { severity: ticket, check: health }
             exp_annotations:
               summary: No external probe has reported in six hours, so the outside checks are blind.
               runbook: reliability/runbooks/probe-stopped.md
