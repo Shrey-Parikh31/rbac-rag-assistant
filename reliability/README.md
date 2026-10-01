@@ -64,6 +64,7 @@ push.
 | `KbIndexLooksBroken` | ticket | [index-broken.md](runbooks/index-broken.md) |
 | `KbAccessControlFailing` | page | [access-control-failing.md](runbooks/access-control-failing.md) |
 | `KbUnreachableFromOutside` | page | [kb-down.md](runbooks/kb-down.md) |
+| `KbProbeStopped` | ticket | [probe-stopped.md](runbooks/probe-stopped.md) |
 | `KbBreakerOpen` | ticket | [breaker-open.md](runbooks/breaker-open.md) |
 | `KbRotationIncomplete` | ticket | [rotation-incomplete.md](runbooks/rotation-incomplete.md) |
 | `KbPodImbalance` | ticket | [pod-imbalance.md](runbooks/pod-imbalance.md) |
@@ -86,6 +87,13 @@ closes an action item an experiment left open.
   ten minutes after it stops, because the disclosure still happened
 - one failed health probe does **not** page: on a platform that scales to zero
   that is a cold start, and an alert that fires on those gets muted within a week
+- a probe that stops reporting altogether files a ticket, **and the test asserts
+  that `KbUnreachableFromOutside` stays silent in the same run**, because with no
+  samples its expression returns nothing rather than zero. That silence is the
+  reason the dead man's switch exists
+- the probe tests run at a 30-minute sample interval rather than one a minute,
+  because the earlier one-a-minute tests were proving these rules worked against
+  a delivery rate that never happens in production
 - one pod taking 100% of traffic files a ticket, while `KbAvailabilityBurn` and
   `KbDown` stay silent in the same test, which is the point of it existing
 - a rotation that converges across pods in under a minute files nothing; one pod

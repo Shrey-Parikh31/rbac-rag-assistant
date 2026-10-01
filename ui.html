@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Role-aware knowledge assistant</title>
+<title>Ask a question, see only what you may see</title>
 <!--
   The demo page. One file, no framework, no build step: served by the same
   container as the API, so there is nothing extra to deploy, break or pay for.
@@ -43,8 +43,14 @@
   .wrap { max-width:58rem; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
 
   header { margin-bottom:1.75rem; }
-  h1 { font-size:1.45rem; margin:0 0 .3rem; letter-spacing:-.015em; font-weight:620; }
-  header p { margin:0; color:var(--muted); max-width:40rem; }
+  h1 { font-size:1.45rem; margin:0 0 .45rem; letter-spacing:-.015em; font-weight:620; }
+  header p { margin:0; color:var(--muted); max-width:42rem; }
+  header strong { color:var(--fg); font-weight:600; }
+  /* Three numbered steps, so the first thing a stranger reads is what to do.
+     An ordered list rather than a tour library: the browser numbers it. */
+  .steps { margin:.85rem 0 0; padding-left:1.15rem; max-width:42rem;
+           color:var(--muted); font-size:.92rem; }
+  .steps li { margin:.15rem 0; }
 
   .grid { display:grid; grid-template-columns:1fr 17rem; gap:1rem; align-items:start; }
   @media (max-width:820px) { .grid { grid-template-columns:1fr; } }
@@ -80,7 +86,8 @@
   button:disabled { opacity:.55; cursor:progress; }
   :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
-  .chips { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.7rem; }
+  .hint { color:var(--muted); font-size:.85rem; margin:.7rem 0 0; }
+  .chips { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.45rem; }
   .chip {
     font-size:.85rem; padding:.3rem .65rem; border-radius:999px;
     background:var(--bg); border:1px solid var(--line); color:var(--muted);
@@ -126,25 +133,34 @@
 
 <div class="wrap">
   <header>
-    <h1>Role-aware knowledge assistant</h1>
-    <p>Answers come from university policy documents, and you are shown only what
-       your role is cleared to read. Everything below is live.</p>
+    <h1>Ask a question. See only what you are allowed to see.</h1>
+    <p>A working demo of an assistant for a university's internal documents.
+       Four documents are loaded: two that anyone may read, one for staff only,
+       one confidential. You are a <strong id="role-word">student</strong> here, so
+       <strong>some questions will be refused on purpose</strong>. That refusal is
+       the thing being demonstrated.</p>
+    <ol class="steps">
+      <li>Click one of the four examples, or type your own question.</li>
+      <li>Read the answer, then the grey line under it saying what just happened.</li>
+      <li>On the right: who you are, and what you may and may not read.</li>
+    </ol>
   </header>
 
   <div class="grid">
     <div>
       <form class="panel" id="ask">
-        <p class="label">Ask</p>
+        <p class="label">Ask a question</p>
         <div class="field">
           <input id="q" name="q" autocomplete="off" autofocus
-                 placeholder="Ask about enrolment, grading, incidents, pay…">
+                 placeholder="e.g. how late can I sign up for a class?">
           <button class="primary" id="go">Search</button>
         </div>
+        <p class="hint">Try these four. Each one ends differently on purpose:</p>
         <div class="chips" id="examples">
-          <button type="button" class="chip" data-q="How late can I enroll in a course?">a public policy</button>
-          <button type="button" class="chip" data-q="What are the faculty compensation bands?">something confidential</button>
-          <button type="button" class="chip" data-q="How long do I have to report a suspected compromise?">staff-only guidance</button>
-          <button type="button" class="chip" data-q="What are the library opening hours?">something it has no answer for</button>
+          <button type="button" class="chip" data-q="How late can I enroll in a course?">1. You get an answer</button>
+          <button type="button" class="chip" data-q="What are the faculty compensation bands?">2. Refused: confidential</button>
+          <button type="button" class="chip" data-q="How long do I have to report a suspected compromise?">3. Refused: staff only</button>
+          <button type="button" class="chip" data-q="What are the library opening hours?">4. Nobody knows</button>
         </div>
       </form>
 
@@ -158,48 +174,64 @@
           </span>
           <span class="pill" id="timing" hidden></span>
         </div>
-        <pre id="passage" aria-live="polite">Ask a question, or try one of the examples.</pre>
-        <div class="why" id="why">Three things can happen: you are shown the passage,
-          you are told that matching material exists above your clearance, or nothing
-          in the corpus covers it. The third is not a failure; refusing to invent an
-          answer is the point.</div>
+        <pre id="passage" aria-live="polite">Pick an example above, or type your own question.</pre>
+        <div class="why" id="why">Only three things can ever happen here, and all
+          three are correct behaviour:
+          <strong>you get the passage</strong>,
+          <strong>you are told something matching exists but you may not read it</strong>, or
+          <strong>no document covers it at all</strong>.
+          The last one is not the system failing. Refusing to invent an answer is
+          the point of it.</div>
       </div>
     </div>
 
     <aside>
       <div class="panel">
         <p class="label">Who you are</p>
+        <p class="who" id="who"><span class="dot"></span><span id="who-text">checking…</span></p>
+        <p class="hint" style="margin:.55rem 0 .6rem">
+          Your role comes from the password below, never from anything you can
+          type into the question box. That is the whole security idea.
+        </p>
         <div class="field">
           <input id="token" value="__TOKEN__" autocomplete="off" spellcheck="false"
-                 placeholder="paste a token" aria-label="Access token">
+                 placeholder="paste a password" aria-label="Access token">
         </div>
-        <p class="who" id="who" style="margin:.7rem 0 0"><span class="dot"></span><span id="who-text">checking…</span></p>
-        <p style="color:var(--muted);font-size:.85rem;margin:.6rem 0 0">
-          The student token is published so anyone can try this. Staff and
-          administrator tokens are not: paste one and the same questions return more.
+        <p class="hint" style="margin:.6rem 0 0">
+          The student password is printed here so anyone can try the demo. The
+          staff and administrator ones are not published; with one of those, the
+          refused questions above start returning real answers.
         </p>
       </div>
 
       <div class="panel">
-        <p class="label">The corpus</p>
+        <p class="label">What is in here</p>
         <div id="docs"><div class="skeleton" style="width:80%"></div><div class="skeleton" style="width:60%"></div></div>
+        <p class="hint" style="margin:.6rem 0 0">
+          Documents you cannot read are counted, never named. Telling you the
+          title of a confidential file is already describing it.
+        </p>
       </div>
 
-      <div class="panel">
-        <p class="label">The same question, as code</p>
-        <pre id="curl" style="margin:0;font-size:.78rem;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted)"></pre>
+      <!-- Folded away by default: a stranger does not need a curl command, and a
+           developer will open it. <details> does this with no JavaScript. -->
+      <details class="panel">
+        <summary class="label" style="cursor:pointer;margin:0">For developers: the same question as an API call</summary>
+        <pre id="curl" style="margin:.75rem 0 0;font-size:.78rem;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted)"></pre>
         <button type="button" id="copy" style="margin-top:.6rem;font-size:.85rem">Copy</button>
-      </div>
+      </details>
     </aside>
   </div>
 
   <footer>
-    Retrieval only; generated answers are switched off here, because the free tier
-    allows 20 a day and one visitor could spend them. It sleeps when nobody is
-    using it, so the first question after a quiet spell takes a moment. Press
-    <kbd>/</kbd> to focus the question box.
-    <a href="https://github.com/Shrey-Parikh31/rbac-rag-assistant">Source, tests and
-    the postmortems from breaking it on purpose</a>.
+    <p style="margin:0 0 .5rem"><strong>Two things that look like faults and are not.</strong>
+    The first question after a quiet spell takes a few seconds, because the server
+    is asleep to keep it free. And it finds passages rather than writing answers in
+    its own words: the writing step is switched off here, since the free allowance
+    is 20 a day and a single visitor could spend it.</p>
+    <p style="margin:0">Press <kbd>/</kbd> to jump to the question box.
+    <a href="https://github.com/Shrey-Parikh31/rbac-rag-assistant">Source code, the
+    tests, and the write-ups from deliberately breaking it</a>.</p>
   </footer>
 </div>
 
@@ -207,16 +239,20 @@
   const $ = (id) => document.getElementById(id);
   const FLOOR = 0.61;                       // rag.MIN_SCORE, drawn on the score bar
   const SCALE = [0.45, 0.85];               // where the bar starts and ends
+  // Written for someone who has never heard of RAG. The numbers stay, because the
+  // score bar is on screen and an unexplained number is worse than a jargon word.
   const WHY = {
-    answer: "Answered: a passage your role may read scored above the similarity floor. " +
-            "The bar shows cosine similarity; the notch is the 0.61 floor, below which a " +
-            "match is treated as no match.",
-    restricted: "Refused: material matching your question exists above your clearance. " +
-                "You are told it exists and nothing about what it says, not even which " +
-                "office owns it, because naming the owner describes the document.",
-    no_match: "Nothing found: no document covers this at any clearance level. Saying so " +
-              "beats inventing an answer, and the evaluation set exists to keep that honest.",
-    error: "The service answered with an error; the status is above."
+    answer: "You were allowed to read this. The bar shows how closely your question " +
+            "matched the document, and the notch at 0.61 is the cut-off: below it, a " +
+            "match is treated as no match at all, so the system can say it does not know.",
+    restricted: "A document that answers your question does exist, and you are not " +
+                "cleared to read it. Notice what you were not told: not its title, not " +
+                "its subject, not even which office owns it. Naming the owner would " +
+                "already describe the document.",
+    no_match: "No document here covers this, at any access level. Nothing is broken. " +
+              "The alternative would be making something up that sounds right, which " +
+              "is the failure this whole project is built to avoid.",
+    error: "The service returned an error. The code is shown above."
   };
   const pos = (s) => Math.max(0, Math.min(1, (s - SCALE[0]) / (SCALE[1] - SCALE[0]))) * 100;
 
@@ -230,8 +266,9 @@
     const token = $("token").value.trim();
     $("token").classList.remove("bad");
     if (!token) {
-      badge($("who"), $("who-text"), "who none", "no token");
-      $("docs").textContent = "none";
+      badge($("who"), $("who-text"), "who none", "nobody, no password given");
+      $("role-word").textContent = "visitor with no password";
+      $("docs").textContent = "Nothing, until you enter a password.";
       return;
     }
     badge($("who"), $("who-text"), "who none", "checking…");
@@ -239,12 +276,14 @@
       const r = await fetch("/corpus", { headers: { Authorization: "Bearer " + token } });
       if (r.status !== 200) {
         $("token").classList.add("bad");
-        badge($("who"), $("who-text"), "who warn", r.status === 401 ? "token not accepted" : "HTTP " + r.status);
-        $("docs").textContent = "none";
+        badge($("who"), $("who-text"), "who warn",
+              r.status === 401 ? "that password is not accepted" : "HTTP " + r.status);
+        $("docs").textContent = "Nothing, until the password is accepted.";
         return;
       }
       const b = await r.json();
-      badge($("who"), $("who-text"), "who ok", "you are " + b.role);
+      badge($("who"), $("who-text"), "who ok", "you are a " + b.role);
+      $("role-word").textContent = b.role;     // keep the headline honest
       const docs = document.createElement("div");
       const row = (text, tag, cls) => {
         const d = document.createElement("div");
@@ -300,8 +339,8 @@
       const kind = b.outcome || "answer";
       badge($("outcome"), $("outcome-text"),
             "who " + (kind === "answer" ? "ok" : kind === "restricted" ? "warn" : "none"),
-            { answer: "answered", restricted: "exists, above your clearance",
-              no_match: "nothing found" }[kind] || kind);
+            { answer: "answered", restricted: "exists, but you may not read it",
+              no_match: "no document covers this" }[kind] || kind);
       if (b.sources && b.sources.length) {
         $("source").textContent = b.sources[0].source;
         $("source").hidden = false;

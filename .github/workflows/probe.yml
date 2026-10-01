@@ -19,8 +19,16 @@ name: probe
 
 on:
   schedule:
-    # Every 15 minutes. GitHub's scheduler is best-effort and runs late under
-    # load, which is fine: the alerts are windows, not "exactly four per hour".
+    # This asks for every 15 minutes and does NOT get it. Measured over the
+    # first three days: 23 runs, one roughly every three hours, longest gap
+    # 4h57m. GitHub's scheduled workflows on free runners are best effort, and
+    # a high-frequency cron is a request rather than a promise.
+    #
+    # Left at */15 on purpose. The throttling is by load, not by what is asked
+    # for, so asking less often would only deliver fewer samples. What was
+    # wrong was never this line; it was the alert windows in
+    # reliability/alerts.yaml, which were sized from this number instead of
+    # from the delivery rate, and so could not fire. They are six hours now.
     - cron: "*/15 * * * *"
   workflow_dispatch:
     inputs:

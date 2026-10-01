@@ -151,39 +151,54 @@ tests:
     alert_rule_test:
       - { eval_time: 30m, alertname: KbIndexLooksBroken, exp_alerts: [] }
   # --------------------------------------------------- seen from outside
+  # `interval: 30m`, not 1m, and that is the point of this block.
+  #
+  # These tests used to run at one sample a minute, which quietly assumed the
+  # probe delivered that often. It does not. GitHub runs the schedule roughly
+  # every three hours, so the tests were proving the alerts worked against a
+  # sample rate that never happens. A test can be green and still be about a
+  # different system than the one in production.
+  #
+  # 30m is still optimistic against the measured 3h, deliberately: if the rules
+  # hold at 30m they hold at 15m too, and promtool series at 3h intervals would
+  # need hundreds of points to cover a 6h window.
   - name: a probe that catches a leak pages immediately
-    interval: 1m
+    interval: 30m
     input_series:
       - series: 'kb_probe_up{check="search_refused",origin="github-actions"}'
-        values: '1 1 1 0 1 1 1 1 1 1 1 1 1 1 1'
+        values: '1 1 1 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
       - series: 'kb_probe_up{check="unauthenticated",origin="github-actions"}'
-        values: '1+0x15'
+        values: '1+0x30'
       - series: 'kb_probe_up{check="corpus",origin="github-actions"}'
-        values: '1+0x15'
+        values: '1+0x30'
     alert_rule_test:
       # One failed probe is enough. There is no threshold at which showing a
       # student a restricted document is acceptable, so there is no window to
       # wait out and no `for` to satisfy.
-      - eval_time: 4m
+      - eval_time: 1h30m
         alertname: KbAccessControlFailing
         exp_alerts:
           - exp_labels: { severity: page, check: search_refused, origin: github-actions }
             exp_annotations:
               summary: A probe that checks access control failed; restricted material may be reachable.
               runbook: reliability/runbooks/access-control-failing.md
-      # And it keeps paging for ten minutes after the leak stops, because the
-      # material was still disclosed. Silence at t+5 would let a leak that
-      # self-corrected go unexamined.
-      - eval_time: 10m
+      # Still paging five hours later, with every probe since reporting fine.
+      # The material was disclosed; a leak that self-corrected is not a leak
+      # that did not happen, and an alert that cleared in ten minutes would let
+      # it pass unexamined.
+      - eval_time: 6h
         alertname: KbAccessControlFailing
         exp_alerts:
           - exp_labels: { severity: page, check: search_refused, origin: github-actions }
             exp_annotations:
               summary: A probe that checks access control failed; restricted material may be reachable.
               runbook: reliability/runbooks/access-control-failing.md
+      # And it does clear eventually, once the failure is off the back of the
+      # six-hour window. An alert that never clears is one somebody silences.
+      - { eval_time: 8h, alertname: KbAccessControlFailing, exp_alerts: [] }
 
   - name: access control holding pages nobody
-    interval: 1m
+    interval: 30m
     input_series:
       - series: 'kb_probe_up{check="search_refused"}'
         values: '1+0x30'
@@ -192,34 +207,60 @@ tests:
       - series: 'kb_probe_up{check="corpus"}'
         values: '1+0x30'
     alert_rule_test:
-      - { eval_time: 30m, alertname: KbAccessControlFailing, exp_alerts: [] }
+      - { eval_time: 10h, alertname: KbAccessControlFailing, exp_alerts: [] }
 
-  # A single failed health probe is a blip on a scale-to-zero platform: one
-  # cold start that took longer than the timeout. Ten minutes of nothing is an
-  # outage. The alert has to tell those apart, or it pages on cold starts.
+  # A single failed health probe is a blip on a scale-to-zero platform: one cold
+  # start that outlasted the timeout. Hours of nothing is an outage. The alert
+  # has to tell those apart, or it pages every time a container is slow to wake.
   - name: one failed health probe is not an outage
-    interval: 1m
+    interval: 30m
     input_series:
       - series: 'kb_probe_up{check="health"}'
         values: '1 1 1 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
     alert_rule_test:
-      - { eval_time: 5m,  alertname: KbUnreachableFromOutside, exp_alerts: [] }
-      - { eval_time: 20m, alertname: KbUnreachableFromOutside, exp_alerts: [] }
+      - { eval_time: 2h,  alertname: KbUnreachableFromOutside, exp_alerts: [] }
+      - { eval_time: 9h,  alertname: KbUnreachableFromOutside, exp_alerts: [] }
 
-  - name: a service unreachable from outside for ten minutes pages
-    interval: 1m
+  - name: a service unreachable from outside for six hours pages
+    interval: 30m
     input_series:
       - series: 'kb_probe_up{check="health"}'
-        values: '1 1 1 1 1 0+0x25'
+        values: '1 1 1 1 0+0x30'
     alert_rule_test:
-      - { eval_time: 10m, alertname: KbUnreachableFromOutside, exp_alerts: [] }
-      - eval_time: 22m
+      # Four hours in, still within the window that holds a success. Not yet.
+      - { eval_time: 4h, alertname: KbUnreachableFromOutside, exp_alerts: [] }
+      - eval_time: 8h
         alertname: KbUnreachableFromOutside
         exp_alerts:
           - exp_labels: { severity: page, check: health }
             exp_annotations:
-              summary: The service has not answered an external probe for ten minutes.
+              summary: The service has not answered an external probe for six hours.
               runbook: reliability/runbooks/kb-down.md
+
+  # The dead man's switch. Everything above asks a question about samples that
+  # exist; this one is the only rule that fires because they do not.
+  - name: a probe that stops reporting is noticed
+    interval: 30m
+    input_series:
+      # Reports for three hours, then the workflow stops entirely.
+      - series: 'kb_probe_up{check="health"}'
+        values: '1+0x6'
+    alert_rule_test:
+      # While it is reporting, and for six hours after its last sample, nothing.
+      - { eval_time: 3h, alertname: KbProbeStopped, exp_alerts: [] }
+      - { eval_time: 8h, alertname: KbProbeStopped, exp_alerts: [] }
+      # Past six hours of silence, a ticket. Note which alert does NOT fire
+      # here: KbUnreachableFromOutside stays quiet throughout, because with no
+      # samples at all its expression returns nothing rather than zero. That is
+      # the whole reason this rule exists.
+      - eval_time: 10h
+        alertname: KbProbeStopped
+        exp_alerts:
+          - exp_labels: { severity: ticket }
+            exp_annotations:
+              summary: No external probe has reported in six hours, so the outside checks are blind.
+              runbook: reliability/runbooks/probe-stopped.md
+      - { eval_time: 10h, alertname: KbUnreachableFromOutside, exp_alerts: [] }
 
   # ---------------------------------------------------------------- state
   # The breaker opening and closing inside a minute is it working: three slow

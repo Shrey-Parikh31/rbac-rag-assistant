@@ -170,12 +170,27 @@ groups:
       # `kb_probe_up` is a gauge at one point per run, so these are thresholds
       # on recent history rather than burn rates. There is no rate to take.
 
+      # All three windows below are six hours, and that number is a bug fix.
+      #
+      # They were first written as ten minutes, because the cron says the probe
+      # runs every fifteen. **GitHub does not honour that.** Measured over the
+      # first three days of real scheduling: 23 runs, averaging one every three
+      # hours, with gaps up to 4h57m. Scheduled workflows on free runners are
+      # best effort, and a high-frequency cron is treated as a suggestion.
+      #
+      # So a ten-minute window was empty almost all the time, the expression
+      # returned no data rather than a result, and the alert could not fire. It
+      # looked exactly like an alert that had simply never needed to.
+      #
+      # Six hours is two missed probes at the observed rate. Do not tighten it
+      # from the cron expression; measure the delivery rate again instead.
+
       # The most serious alert in this file. A student was shown, or could have
       # been shown, something restricted: not a slow service, not a broken one,
       # the single rule the whole project exists to enforce. Availability and
       # latency stay perfect throughout, so nothing else here can see it.
       - alert: KbAccessControlFailing
-        expr: min_over_time(kb_probe_up{check=~"unauthenticated|search_refused|corpus"}[10m]) == 0
+        expr: min_over_time(kb_probe_up{check=~"unauthenticated|search_refused|corpus"}[6h]) == 0
         for: 0m
         labels:
           severity: page
@@ -184,17 +199,35 @@ groups:
           runbook: reliability/runbooks/access-control-failing.md
 
       # Not "the service is down": the probe cannot reach it, which also covers
-      # DNS, TLS and the platform in front of the container. Ten minutes because
-      # the probe runs every fifteen and two consecutive failures should not
-      # need half an hour to become a page.
+      # DNS, TLS and the platform in front of the container.
       - alert: KbUnreachableFromOutside
-        expr: max_over_time(kb_probe_up{check="health"}[10m]) == 0
-        for: 5m
+        expr: max_over_time(kb_probe_up{check="health"}[6h]) == 0
+        for: 0m
         labels:
           severity: page
         annotations:
-          summary: The service has not answered an external probe for ten minutes.
+          summary: The service has not answered an external probe for six hours.
           runbook: reliability/runbooks/kb-down.md
+
+      # The dead man's switch, and the rule the two above cannot live without.
+      #
+      # Both of them ask a question about samples that exist. If the probe stops
+      # running altogether, because the workflow was disabled, the credentials
+      # expired, or GitHub paused the schedule on an idle repository, which it
+      # does after 60 days, then there are no samples, both expressions return
+      # nothing, and both alerts go quiet. **A monitor that has stopped
+      # reporting is indistinguishable from a system with nothing to report.**
+      #
+      # `absent_over_time` is the one function here that fires on the absence of
+      # data rather than its value, which is exactly the gap.
+      - alert: KbProbeStopped
+        expr: absent_over_time(kb_probe_up{check="health"}[6h])
+        for: 0m
+        labels:
+          severity: ticket
+        annotations:
+          summary: No external probe has reported in six hours, so the outside checks are blind.
+          runbook: reliability/runbooks/probe-stopped.md
 
       # ------------------------------------------------------ state, not rate
       # Three conditions that a counter cannot express and a log line expresses

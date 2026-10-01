@@ -221,7 +221,7 @@ def describe(result):
                 "Something matching your question exists above your clearance.")
         return "restricted", [], (
             said + " You are not cleared to read it, and this service will not "
-            "describe it -- not its contents, not its subject, not which office "
+            "describe it: not its contents, not its subject, not which office "
             "owns it. Ask that office directly if you believe you should have "
             "access.")
     sources = [{"source": m.group(1), "score": float(m.group(2))}

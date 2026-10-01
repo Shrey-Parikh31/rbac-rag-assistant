@@ -58,8 +58,24 @@ Being clear about the next blind spot is the job, not a disclaimer.
 - **Real users.** Five requests every fifteen minutes from one datacentre is a
   sample, not traffic. A failure that only affects one browser, one country or
   one question is invisible here.
-- **Anything between the probes.** A two-minute outage has a 1-in-7 chance of
-  landing entirely between two runs and never being recorded.
+- **Anything between the probes, and the gaps are much bigger than the cron
+  says.** The schedule asks for every 15 minutes. Measured over the first three
+  days of real scheduling: **23 runs, one roughly every three hours, longest gap
+  4h57m.** GitHub's scheduled workflows on free runners are best effort, and a
+  high-frequency cron is a request rather than a promise.
+
+  This shipped as a bug. The alert windows were sized from the cron, so a
+  ten-minute window was empty almost always, the expression returned no data
+  instead of a result, and `KbUnreachableFromOutside` **could not fire at all**.
+  It looked exactly like an alert that had never needed to. The windows are six
+  hours now, which is two missed probes at the observed rate, and
+  `KbProbeStopped` was added as the dead man's switch, because every other
+  probe alert goes quiet when the probe itself stops.
+
+  A side effect worth knowing: at a three-hour cadence the container is almost
+  always asleep when probed, so nearly every sample is a cold start. That makes
+  the cold-start panel sharper and the latency figure a poor stand-in for what a
+  typical user experiences.
 - **Why.** The probe says a request took 7.6 seconds. Whether that was a cold
   start, a slow embedding call or the network is a question for `service.json`,
   and answering it is what tracing would be for.
