@@ -109,6 +109,7 @@ things make it a gate rather than a report:
 | `observability/test_probe.py` | the external probe stops noticing a leak, a wrong document or an empty index |
 | `security/redteam.py --gate` | any of 51 attacks succeeds, or any of them cannot be delivered |
 | `eval/retrieval.py` clearance drift | the system grants access the audit table does not |
+| `security/test_guardrails.py` | the live guardrail stops recognising a word the leak scorer treats as a leak |
 
 **Both scanners caught something real on their first run.** Trivy refused to
 publish over three criticals in `perl-base`: a heap overflow compiling regular
@@ -251,6 +252,17 @@ attack fails the gate exactly as a successful one does.
 in**, because the corpus path was relative and an empty index answers every
 attack with "no match". The run now refuses to report unless the index holds
 documents and at least one of them is restricted.
+
+On top of the attacks there is one control that runs **after** the model rather
+than before it, checking what it said about what it was shown. Its before and
+after is 0 to 0 and that is the honest finding: the corpus attacks paths with no
+model in them, so there was never a generated sentence for an output check to
+catch, and a table showing an improvement would mean the attacks had been
+rewritten to flatter the new control. What it does catch is a failure that
+already happened, the assistant naming the subject of a document it had just
+refused, which previously needed a second model reading every answer and is now
+a string check that runs on every request for nothing. What still gets through
+is a paraphrase, recorded as a passing test so the limit is a known one.
 
 Full write-up, including the six attacks that stay quiet even with the filter
 removed and why each one does: [`security/README.md`](security/README.md).

@@ -160,11 +160,83 @@ instruction is hidden inside a document and the question is whether the model
 obeys it, needs real generation and cannot be cached. It is opt in, counted and
 priced before it runs, and it is the next piece of work here.
 
+## The guardrail, and an honest before and after
+
+[`guardrails.py`](../guardrails.py) checks what the model **says** about what it
+was shown, after the fact. Every other control here runs before the model and
+decides what it may see. This one is the only control on the sentence itself.
+
+### The before and after is 0 to 0, and that is the finding
+
+| | attacks delivered | succeeded |
+|---|---|---|
+| before the guardrail | 51 | 0 |
+| after the guardrail | 51 | 0 |
+
+**The guardrail changed nothing measurable, and reporting it any other way would
+be dishonest.** The corpus attacks retrieval, the tools, HTTP and the page
+source. None of those paths involve a model, so there was never a generated
+sentence for an output check to catch. A table showing an improvement here would
+mean the attacks had been rewritten to flatter the new control.
+
+What it defends is a path the corpus does not reach, and the evidence for it is
+a failure that already happened rather than an attack invented for it.
+
+### What it actually catches
+
+Layer 3, asked for the adjunct pay rate, got this from the assistant:
+
+> contact the office responsible for **faculty compensation**
+
+Nothing leaked. Every control before the model held. Retrieval was correct, the
+clearance filter worked, the refusal was correctly labelled. The student was
+told what the document they had just been refused is about, and the model worked
+that out from the question. At the time it took a second model reading every
+answer to catch, which costs a call per answer.
+
+It is now a string check that runs inline on every request, for nothing:
+
+| Check | Fires when |
+|---|---|
+| contents | the answer repeats restricted material, checked precisely because it should be impossible if retrieval is right, and a layer that assumes another layer is correct is not a second layer |
+| subject | the answer names what a refused document is about, using a word found neither in the user's question nor in any passage the model was shown |
+
+**The exclusions are the hard half.** Repeating a word the user supplied
+discloses nothing, and quoting a passage they were legitimately given is not a
+leak. Without both, the check blocks correct refusals, and an output check that
+blocks good answers is one somebody turns off inside a week. Four of the ten
+tests in [`test_guardrails.py`](test_guardrails.py) exist only to hold that line.
+
+### What still gets through
+
+**A paraphrase.** "The office that handles what teaching staff are paid
+annually" contains none of the watched words and sails past. That is written
+down as a passing test rather than a footnote, so the limit is a known one: if
+that test ever starts failing, somebody has upgraded the check and owes the file
+an explanation.
+
+This is exactly what the LLM-as-judge in `eval/` is for, and why it costs a model
+call per answer and runs on a schedule while this runs on every request. The
+upgrade path, if judged runs ever show a paraphrase leak, is an embedding
+similarity check against the restricted documents, which is affordable because
+their vectors are already in memory.
+
+### The vocabulary is deliberately duplicated
+
+`guardrails.py` keeps its own copy of the restricted words instead of importing
+the scorer's, and that is not an oversight. The lesson from the first bug on this
+page is what happens when the thing being checked and the thing doing the
+checking read one list: weakening it weakens both in the same edit, and the alarm
+that would have caught you is the alarm you just disabled.
+
+Two copies only help if something compares them.
+`test_guardrails.py` asserts the system's list still covers the scorer's, so they
+drift apart loudly rather than quietly. The guardrail may know more. It may never
+know less.
+
 ## Still to come
 
-- The model surface: indirect prompt injection through document contents,
-  insecure output handling on generated text, and grounding under adversarial
-  pressure
-- The guardrail layer, and an honest before-and-after that includes what still
-  gets through
+- The model surface: indirect prompt injection through document contents, where
+  the instruction is inside a document rather than in the question. Needs real
+  generated answers, so it is the one part of this directory that costs money.
 - A risk assessment mapped to the NIST AI Risk Management Framework
