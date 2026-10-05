@@ -264,6 +264,12 @@ refused, which previously needed a second model reading every answer and is now
 a string check that runs on every request for nothing. What still gets through
 is a paraphrase, recorded as a passing test so the limit is a known one.
 
+[`security/RISK.md`](security/RISK.md) is the register: twelve risks mapped to
+the NIST AI Risk Management Framework, each control pointing at a file or a
+number that exists, each gap named rather than dashed. GOVERN is marked not
+applicable across all 19 subcategories, because it assumes an organisation and
+there is one person here.
+
 Full write-up, including the six attacks that stay quiet even with the filter
 removed and why each one does: [`security/README.md`](security/README.md).
 

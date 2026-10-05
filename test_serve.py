@@ -421,6 +421,43 @@ def check_token_reload():
         p.kill()
 
 
+def check_logs_never_carry_the_question():
+    """The question must not reach stderr, and until now nothing checked it.
+
+    `Handler.log_message` strips the query string deliberately, and the comment
+    explaining why is the only thing that was defending it. Every other test in
+    this file spawns the server with stderr=DEVNULL, so no test has ever looked
+    at what it writes. A control nothing reads is a control nobody would notice
+    losing: one `%s` put back into that format string, and every question a user
+    typed is in the logs of whoever runs this.
+
+    The question here is deliberately both private and distinctive, so a
+    substring search cannot pass by accident.
+    """
+    secret = "amipregnantandfailingmydegree"
+    port = _free_port()
+    env = _keyless(dict(os.environ, KB_TOKENS=KB_TOKENS, PORT=str(port)))
+    p = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(__file__), "serve.py")],
+                         env=env, stderr=subprocess.PIPE)
+    base = f"http://127.0.0.1:{port}"
+    try:
+        for _ in range(60):
+            try:
+                if call(base, "/health", timeout=2)[0] == 200:
+                    break
+            except Exception:
+                time.sleep(0.5)
+        call(base, f"/search?q={secret}", role="student", timeout=15)
+        call(base, f"/nope?q={secret}", role="student", timeout=15)
+    finally:
+        p.terminate()
+        logs = p.communicate(timeout=15)[1].decode("utf-8", "replace")
+
+    assert "/search" in logs, f"the access log wrote nothing to check: {logs!r}"
+    assert secret not in logs, "the user's question reached the logs"
+    assert "q=" not in logs, f"a query string reached the logs: {logs!r}"
+
+
 def check_drain(proc, base):
     """SIGTERM starts a drain, not an exit.
 
@@ -458,6 +495,8 @@ if __name__ == "__main__":
         print("breaker: ok")
         check_token_reload()
         print("token reload: ok")
+        check_logs_never_carry_the_question()
+        print("log redaction: ok")
         proc, base = _spawn()
         try:
             run(base)

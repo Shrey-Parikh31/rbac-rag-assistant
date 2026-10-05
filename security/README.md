@@ -234,9 +234,36 @@ Two copies only help if something compares them.
 drift apart loudly rather than quietly. The guardrail may know more. It may never
 know less.
 
+## The risk assessment
+
+[`RISK.md`](RISK.md) maps twelve risks to the NIST AI Risk Management Framework
+(AI RMF 1.0) and the Generative AI Profile. Every control it names points at a
+file or a number in this repository, and every control without evidence says so
+in the same row.
+
+Three things in it worth reading first:
+
+- **GOVERN is marked not applicable**, all 19 subcategories. It assumes an
+  organisation with a risk committee and a legal review, and there is one person
+  here. Claiming it would be exactly the failure this directory is about.
+- **R6, a control that looks like it works and does not**, is listed as the
+  dominant risk, with a measured base rate of 22. It is the only risk here that
+  compromises every other row at once, and the only one where the honest residual
+  is "the next one already exists and has not been found yet".
+- **R5, indirect prompt injection, is open and labelled the largest open risk.**
+  Its bound is stated: an obeyed injection could make the assistant say something
+  foolish, but it cannot make retrieval return a document the caller may not read.
+
+Writing it found a real gap. The access log strips the query string on purpose,
+because the question is the private part, and that had **no test**. Every test
+spawned the server with stderr discarded, so one edit to that format string would
+have put every question a user typed into the logs and nothing would have failed.
+There is a test now.
+
 ## Still to come
 
 - The model surface: indirect prompt injection through document contents, where
   the instruction is inside a document rather than in the question. Needs real
   generated answers, so it is the one part of this directory that costs money.
-- A risk assessment mapped to the NIST AI Risk Management Framework
+- Somebody other than the author attacking it, which is the weakest point in the
+  whole register.
