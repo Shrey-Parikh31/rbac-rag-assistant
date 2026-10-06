@@ -149,6 +149,23 @@ class ProbeTest(unittest.TestCase):
 
     # -- what gets shipped --------------------------------------------------
 
+    def test_health_runs_first_so_it_can_see_a_cold_start(self):
+        """The ordering is a measurement, not a style choice.
+
+        Only the first check of a run meets a sleeping container; everything
+        after it is warm. The cold-start panel reads `check="health"`, so if
+        anything is scheduled ahead of health, that panel shows "No data"
+        forever, which on a dashboard reads exactly like "nothing happened".
+
+        That is not hypothetical. It was the case for the first week, and the
+        2.23 second wake-up that proved it was recorded under `unauthenticated`,
+        where nobody had a reason to look.
+        """
+        self.assertEqual(
+            probe.CHECKS[0].name, "health",
+            "health must run first or the cold-start panel can never see one; "
+            "see the comment above CHECKS in probe.py")
+
     def test_line_protocol_is_one_point_per_check_sharing_a_timestamp(self):
         lines, failed = probe.measure(self.base, "test")
         self.assertEqual(len(lines), len(probe.CHECKS))

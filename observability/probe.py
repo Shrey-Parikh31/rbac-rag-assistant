@@ -118,16 +118,34 @@ LEAK_WORDS = ("compensation band", "pay scale", "adjunct",        # salary-bands
 # readable one, so a hit is a leak and not a coincidence. A word added here
 # without that check turns the probe into an alarm nobody trusts.
 
+# **The order of this list is load-bearing, and `health` must stay first.**
+#
+# Cloud Run scales to zero, so the first request of a run pays the whole cost of
+# waking the container and every request after it is warm. Whichever check runs
+# first is therefore the only one that can ever observe a cold start.
+#
+# This was wrong for the first week. `unauthenticated` ran first, absorbed the
+# wake-up, and `health` was measured against an already-running container: max
+# 63.5ms across its whole history. The dashboard panel counting cold starts
+# reads `check="health"` and so showed **No data**, which on a dashboard is
+# indistinguishable from "it is fine, nothing happened". The 2.23 second cold
+# start that proved it was sitting in the `unauthenticated` series the whole
+# time, under a label that gives nobody a reason to look at it.
+#
+# `health` is the right one to carry this because it has no work to do, so
+# anything over a second in it is the platform rather than the code.
+# test_probe.py asserts the ordering so a future edit cannot quietly undo it.
 CHECKS = [
+    # Cheapest possible request, and deliberately first. Its duration is the
+    # closest thing this project has to a cold-start measurement: the server's
+    # own clock starts after the container is already running, so this number
+    # is the only place the user's wait is visible at all.
+    Check("health", "/health"),
+
     # No token at all. The service is public, so this is the check that says
     # whether it is still refusing strangers, which is a thing a bad deploy can
     # silently stop doing.
     Check("unauthenticated", "/search?q=anything", token=None, status=401),
-
-    # Cheapest possible request. Its duration is the closest thing this project
-    # has to a cold-start measurement: the server's own clock starts after the
-    # container is already running.
-    Check("health", "/health"),
 
     # A question whose answer is known, so "returns 200" is not mistaken for
     # "works". This is postmortem 002's failure mode: an index that has loaded

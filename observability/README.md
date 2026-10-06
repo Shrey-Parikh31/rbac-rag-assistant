@@ -73,9 +73,19 @@ Being clear about the next blind spot is the job, not a disclaimer.
   probe alert goes quiet when the probe itself stops.
 
   A side effect worth knowing: at a three-hour cadence the container is almost
-  always asleep when probed, so nearly every sample is a cold start. That makes
-  the cold-start panel sharper and the latency figure a poor stand-in for what a
-  typical user experiences.
+  always asleep when probed, so nearly every run begins with a cold start. That
+  makes the cold-start panel sharper and the latency figure a poor stand-in for
+  what a typical user experiences.
+
+- **Only the first check of a run can see a cold start.** Everything after it
+  is talking to a container that is already awake. This caught the project out:
+  `unauthenticated` used to run first, absorbed the wake-up, and `health` was
+  only ever measured warm, maximum 63.5ms. The cold-start panel reads
+  `check="health"` and so displayed **No data**, which on a dashboard is
+  indistinguishable from "nothing happened". The 2.23 second wake-up that
+  proved it was sitting under the `unauthenticated` label the whole time, where
+  nobody had a reason to look. `health` is first now, and `test_probe.py`
+  asserts it.
 - **Why.** The probe says a request took 7.6 seconds. Whether that was a cold
   start, a slow embedding call or the network is a question for `service.json`,
   and answering it is what tracing would be for.
@@ -88,7 +98,7 @@ the probe and requires it to notice.
 | Check | Fails when |
 |---|---|
 | `unauthenticated` | the service stops asking strangers for a token |
-| `health` | it is unreachable; its duration is the closest thing to a cold-start measurement |
+| `health` | it is unreachable; its duration is the closest thing to a cold-start measurement, which is why it is **first in the list** and must stay there |
 | `search_hit` | a known question stops returning its known document, which is an index that loaded wrong and is answering confidently from the wrong file |
 | `search_refused` | a student is not refused, **or is refused in words that describe what was refused** |
 | `corpus` | the catalogue names a document the caller may not read |
