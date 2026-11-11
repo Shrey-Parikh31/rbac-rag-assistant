@@ -1,34 +1,19 @@
-# RBAC RAG Assistant (MCP Server)
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![MCP Server](https://img.shields.io/badge/MCP-Compatible_Server-6e56cf)](https://modelcontextprotocol.io)
-[![Security Evaluation](https://img.shields.io/badge/Security_CI-48%2F48_Passing_(0_Leaks)-2ea44f)](#)
-[![Retrieval Accuracy](https://img.shields.io/badge/Retrieval_Accuracy-94.7%25-0969da)](#)
-
-**Deterministic Role-Based Access Control (RBAC) for Model Context Protocol (MCP) Retrieval Pipelines.**
-
-Most RAG templates and early MCP servers rely on prompt-level instructions or allow the LLM to pass its own role parameter inside tool calls—leaving production deployments vulnerable to prompt injection and cross-role privilege escalation. 
-
-**`rbac-rag-assistant`** is a reference MCP server architecture and security evaluation harness that enforces access control **deterministically outside the LLM tool interface**:
-- **Transport-Layer Role Binding:** Binds user role identity at the server/configuration boundary before vector retrieval executes, physically isolating unauthorized document chunks from the LLM context window.
-- **48-Question Adversarial CI Benchmark:** Includes a reproducible 48-case evaluation suite testing cross-role boundary enforcement and unauthorized context queries, achieving **94.7% retrieval accuracy with zero data leaks**.
-- **Ecosystem Discoverability:** Compatible with Claude Desktop, Claude Code, and MCP clients; indexed on community MCP registries including **Glama.ai** and **LobeHub**.
-
----
-
 # rbac-rag-assistant
 
-Other projects: [highschool-rag-chatbot](https://github.com/Shrey-Parikh31/highschool-rag-chatbot) ·
-[drivescore-cloud](https://github.com/Shrey-Parikh31/drivescore-cloud)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![MCP Server](https://img.shields.io/badge/MCP-Compatible_Server-6e56cf)](#mcp)
+[![OWASP Red Team](https://img.shields.io/badge/OWASP_Red_Team-51%2F51_Defended_(0_Leaks)-2ea44f)](#attacking-it)
+[![Search Latency](https://img.shields.io/badge/p95_Latency-9.01ms-0969da)](#the-pipeline)
 
-An internal knowledge assistant for a university: staff and students ask
-questions in plain language, and get answers grounded in policy documents they
-are cleared to read. Retrieval-augmented, tool-calling, role-aware, and exposed
-over MCP so any client can use the same tools under the same rules.
+Other projects: [tool-picker (Claude Code plugin)](https://github.com/Shrey-Parikh31/tool-picker) ·
+[drivescore-cloud](https://github.com/Shrey-Parikh31/drivescore-cloud) ·
+[highschool-rag-chatbot](https://github.com/Shrey-Parikh31/highschool-rag-chatbot)
 
-This is Layer 0 of a five-layer system. Layers above it add the delivery
-pipeline, reliability engineering, evaluation, security testing and
-observability, each on top of this application rather than beside it.
+An internal knowledge assistant and reference **Model Context Protocol (MCP)** server (`mcp_server.py`) for a university: staff and students ask questions in plain language, and get answers grounded in policy documents they are cleared to read. Retrieval-augmented, tool-calling, role-aware, and exposed over MCP so any client (including Claude Desktop and Claude Code) can use the same tools under the same rules—indexed on community MCP registries including **Glama.ai** and **LobeHub**.
+
+Unlike standard RAG templates that rely on prompt instructions or allow the model to pass its own role parameter inside tool calls, role identity here is bound out-of-band at the process/transport boundary (`KB_ROLE` / `KB_TOKENS`) and filtered on the candidate set before ranking.
+
+This is Layer 0 of a five-layer system. Layers above it add the delivery pipeline (`kind` Kubernetes chaos/rollback gates + zero-traffic Cloud Run blue/green deploys), reliability engineering, evaluation, OWASP LLM red-team security testing (`51 delivered, 0 succeeded`), NIST AI RMF risk mapping (`security/RISK.md`), and dual internal/external observability, each on top of this application rather than beside it.
 
 ## Try it
 
