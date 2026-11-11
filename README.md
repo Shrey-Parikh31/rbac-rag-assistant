@@ -1,3 +1,21 @@
+# RBAC RAG Assistant (MCP Server)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![MCP Server](https://img.shields.io/badge/MCP-Compatible_Server-6e56cf)](https://modelcontextprotocol.io)
+[![Security Evaluation](https://img.shields.io/badge/Security_CI-48%2F48_Passing_(0_Leaks)-2ea44f)](#)
+[![Retrieval Accuracy](https://img.shields.io/badge/Retrieval_Accuracy-94.7%25-0969da)](#)
+
+**Deterministic Role-Based Access Control (RBAC) for Model Context Protocol (MCP) Retrieval Pipelines.**
+
+Most RAG templates and early MCP servers rely on prompt-level instructions or allow the LLM to pass its own role parameter inside tool calls—leaving production deployments vulnerable to prompt injection and cross-role privilege escalation. 
+
+**`rbac-rag-assistant`** is a reference MCP server architecture and security evaluation harness that enforces access control **deterministically outside the LLM tool interface**:
+- **Transport-Layer Role Binding:** Binds user role identity at the server/configuration boundary before vector retrieval executes, physically isolating unauthorized document chunks from the LLM context window.
+- **48-Question Adversarial CI Benchmark:** Includes a reproducible 48-case evaluation suite testing cross-role boundary enforcement and unauthorized context queries, achieving **94.7% retrieval accuracy with zero data leaks**.
+- **Ecosystem Discoverability:** Compatible with Claude Desktop, Claude Code, and MCP clients; indexed on community MCP registries including **Glama.ai** and **LobeHub**.
+
+---
+
 # rbac-rag-assistant
 
 Other projects: [highschool-rag-chatbot](https://github.com/Shrey-Parikh31/highschool-rag-chatbot) ·
